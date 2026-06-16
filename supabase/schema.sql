@@ -1,4 +1,4 @@
--- Adeldas IMS — Supabase Schema
+-- I-BG CT Asia IMS — Supabase Schema
 -- Run this in the Supabase SQL editor to set up all tables and RLS policies.
 
 -- Enable UUID extension
