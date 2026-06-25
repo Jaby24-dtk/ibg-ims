@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 export type UserRole = 'administrator' | 'inventory_manager' | 'staff' | 'viewer' | null
 
@@ -17,11 +18,10 @@ export function useRole(): UserRole {
     if (!configured) return
     async function load() {
       try {
-        const { createClient } = await import('@/lib/supabase/client')
         const sb = createClient()
-        const { data: { user } } = await sb.auth.getUser()
-        if (!user) { setRole('viewer'); return }
-        const { data } = await sb.from('users').select('role').eq('id', user.id).single()
+        const { data: { session } } = await sb.auth.getSession()
+        if (!session?.user) { setRole('viewer'); return }
+        const { data } = await sb.from('users').select('role').eq('id', session.user.id).single()
         setRole((data?.role as UserRole) ?? 'viewer')
       } catch {
         setRole('viewer')

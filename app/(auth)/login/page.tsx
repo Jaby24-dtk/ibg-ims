@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 function isSupabaseConfigured() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -73,7 +74,6 @@ export default function LoginPage() {
     }
 
     try {
-      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {

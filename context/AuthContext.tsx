@@ -64,29 +64,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     let mounted = true
+    let subscription: { unsubscribe: () => void } | null = null
+
     ;(async () => {
-      const supabase = createClient()
+      try {
+        const supabase = createClient()
 
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!mounted) return
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!mounted) return
 
-      setUser(session?.user ?? null)
-      setLoading(false)
-      if (session?.user) fetchProfile(session.user.id)
+        setUser(session?.user ?? null)
+        setLoading(false)
+        if (session?.user) fetchProfile(session.user.id)
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        async (_event, session) => {
-          if (!mounted) return
-          setUser(session?.user ?? null)
-          if (session?.user) {
-            await fetchProfile(session.user.id)
-          } else {
-            setProfile(null)
+        const { data } = supabase.auth.onAuthStateChange(
+          async (_event, session) => {
+            if (!mounted) return
+            setUser(session?.user ?? null)
+            if (session?.user) {
+              fetchProfile(session.user.id)
+            } else {
+              setProfile(null)
+            }
           }
-        }
-      )
-      return () => { mounted = false; subscription.unsubscribe() }
+        )
+        subscription = data.subscription
+      } catch {
+        if (mounted) setLoading(false)
+      }
     })()
+
+    return () => { mounted = false; subscription?.unsubscribe() }
   }, [isMockMode, fetchProfile])
 
   const signOut = useCallback(async () => {
