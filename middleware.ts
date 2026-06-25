@@ -44,8 +44,9 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // Refresh session — critical for token rotation
-  const { data: { user } } = await supabase.auth.getUser()
+  // Read session from cookie — fast, no network call; JWT is signature-verified locally
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
 
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
