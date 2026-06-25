@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server'
 export async function middleware(request: NextRequest) {
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
