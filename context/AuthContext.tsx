@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { useRouter } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import type { UserRole } from '@/types'
+import { createClient } from '@/lib/supabase/client'
 
 export interface Profile {
   id: string
@@ -43,7 +44,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string) => {
     try {
-      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
       const { data } = await supabase
         .from('users')
@@ -65,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     let mounted = true
     ;(async () => {
-      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
 
       const { data: { session } } = await supabase.auth.getSession()
@@ -92,7 +91,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (isMockMode) { router.push('/login'); return }
-    const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
     await supabase.auth.signOut()
     setUser(null)
