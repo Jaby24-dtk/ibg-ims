@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
@@ -10,6 +10,26 @@ function isSupabaseConfigured() {
   return url.length > 0 && !url.includes('your-project-ref')
 }
 
+const MAX_ATTEMPTS = 5
+const LOCKOUT_MS = 15 * 60 * 1000
+function getAttempts(): { count: number; lockedUntil: number } {
+  try {
+    const d = sessionStorage.getItem('_lka')
+    return d ? JSON.parse(d) : { count: 0, lockedUntil: 0 }
+  } catch { return { count: 0, lockedUntil: 0 } }
+}
+function recordFail() {
+  const a = getAttempts()
+  a.count++
+  if (a.count >= MAX_ATTEMPTS) a.lockedUntil = Date.now() + LOCKOUT_MS
+  sessionStorage.setItem('_lka', JSON.stringify(a))
+}
+function resetAttempts() { sessionStorage.removeItem('_lka') }
+function minutesLocked(): number {
+  const a = getAttempts()
+  return (a.lockedUntil && Date.now() < a.lockedUntil) ? Math.ceil((a.lockedUntil - Date.now()) / 60000) : 0
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
@@ -17,15 +37,36 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [lockedFor, setLockedFor] = useState(0)
   const mockMode = !isSupabaseConfigured()
+
+  useEffect(() => {
+    const mins = minutesLocked()
+    if (mins > 0) {
+      setLockedFor(mins)
+      const t = setInterval(() => {
+        const m = minutesLocked()
+        setLockedFor(m)
+        if (m === 0) clearInterval(t)
+      }, 30000)
+      return () => clearInterval(t)
+    }
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+
+    const locked = minutesLocked()
+    if (locked > 0) {
+      setLockedFor(locked)
+      setError(`Too many failed attempts. Try again in ${locked} minute${locked > 1 ? 's' : ''}.`)
+      return
+    }
+
     setLoading(true)
 
     if (mockMode) {
-      // Demo mode — any email+password works
       await new Promise(r => setTimeout(r, 600))
       router.push('/dashboard')
       return
@@ -36,11 +77,19 @@ export default function LoginPage() {
       const supabase = createClient()
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
-        setError(authError.message === 'Invalid login credentials'
-          ? 'Incorrect email or password. Please try again.'
-          : authError.message)
+        recordFail()
+        const mins = minutesLocked()
+        if (mins > 0) {
+          setLockedFor(mins)
+          setError(`Too many failed attempts. Try again in ${mins} minute${mins > 1 ? 's' : ''}.`)
+        } else {
+          setError(authError.message === 'Invalid login credentials'
+            ? 'Incorrect email or password. Please try again.'
+            : authError.message)
+        }
         setLoading(false)
       } else {
+        resetAttempts()
         router.push('/dashboard')
         router.refresh()
       }
@@ -129,7 +178,7 @@ export default function LoginPage() {
             <p style={{ color: '#64748B', fontSize: 14 }}>Use your I-BG CT Asia email and password.</p>
           </div>
 
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <form method="post" onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
                 Email address
@@ -188,11 +237,11 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || lockedFor > 0}
               className="btn-primary"
-              style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15, opacity: loading ? 0.7 : 1 }}
+              style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15, opacity: (loading || lockedFor > 0) ? 0.7 : 1 }}
             >
-              {loading ? 'Signing in...' : 'Sign in to I-BG CT Asia IMS'}
+              {loading ? 'Signing in...' : lockedFor > 0 ? `Locked — try in ${lockedFor}m` : 'Sign in to I-BG CT Asia IMS'}
             </button>
           </form>
 
@@ -202,20 +251,9 @@ export default function LoginPage() {
             background: '#F8FAFC', borderRadius: 10,
             border: '1px solid #E2E8F0',
           }}>
-            <p style={{ fontSize: 12, color: '#64748B', fontWeight: 500, marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>
               Demo mode — Supabase not connected. Any credentials work.
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {[
-                { role: 'Administrator', email: 'admin@ibgctasia.com', pw: 'admin123' },
-                { role: 'Inv. Manager', email: 'manager@ibgctasia.com', pw: 'manager123' },
-              ].map(({ role, email: e, pw }) => (
-                <div key={role} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569' }}>
-                  <span style={{ fontWeight: 600, color: '#2FA6B8' }}>{role}</span>
-                  <span>{e} / {pw}</span>
-                </div>
-              ))}
-            </div>
           </div>
           )}
 
