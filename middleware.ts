@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "font-src 'self' data: https://fonts.gstatic.com",
     "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "frame-ancestors 'none'",
+    "frame-ancestors 'self' https://command.iamstivai.com",
   ].join('; ')
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
