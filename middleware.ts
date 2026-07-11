@@ -50,9 +50,13 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
   const isRoot = pathname === '/'
+  // The STIV SSO bridge lands here unauthenticated — it establishes the
+  // session client-side via setSession() using tokens minted by STIV, so it
+  // must be reachable before a session cookie exists.
+  const isSsoBridge = pathname === '/sso'
 
   // Redirect unauthenticated users to /login
-  if (!user && !isLoginPage && !isRoot) {
+  if (!user && !isLoginPage && !isRoot && !isSsoBridge) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
