@@ -1,7 +1,6 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import type { UserRole } from '@/types'
 import { createClient } from '@/lib/supabase/client'
@@ -18,12 +17,11 @@ interface AuthContextValue {
   profile: Profile | null
   loading: boolean
   isMockMode: boolean
-  signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null, profile: null, loading: true,
-  isMockMode: false, signOut: async () => {},
+  isMockMode: false,
 })
 
 const MOCK_PROFILE: Profile = {
@@ -36,7 +34,6 @@ function getIsConfigured() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,17 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; subscription?.unsubscribe() }
   }, [isMockMode, fetchProfile])
 
-  const signOut = useCallback(async () => {
-    if (isMockMode) { router.push('/login'); return }
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    setUser(null)
-    setProfile(null)
-    router.push('/login')
-  }, [isMockMode, router])
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isMockMode, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, isMockMode }}>
       {children}
     </AuthContext.Provider>
   )

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Search, Bell, ChevronDown, LogOut,
+  Search, Bell, ChevronDown,
   AlertTriangle, CheckCircle, Info,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -17,7 +17,7 @@ const roleLabels: Record<string, string> = {
 }
 
 export default function Header() {
-  const { profile, signOut } = useAuth()
+  const { profile } = useAuth()
   const router = useRouter()
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -188,27 +188,6 @@ export default function Header() {
                   <span className="badge badge-info" style={{ fontSize: 10, marginTop: 4 }}>{displayRole}</span>
                 )}
               </div>
-              {[
-                { icon: LogOut, label: 'Sign Out', action: () => { setProfileOpen(false); signOut() } },
-              ].map(({ icon: Icon, label, action }) => (
-                <button
-                  key={label}
-                  onClick={action}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 16px', width: '100%',
-                    background: 'transparent', border: 'none',
-                    fontSize: 13, fontWeight: 500, color: label === 'Sign Out' ? '#EF4444' : '#374151',
-                    cursor: 'pointer', transition: 'background 0.1s',
-                    fontFamily: 'Inter, sans-serif',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <Icon size={15} />
-                  {label}
-                </button>
-              ))}
             </div>
           </>
         )}
