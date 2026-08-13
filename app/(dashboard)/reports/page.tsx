@@ -251,7 +251,7 @@ export default function ReportsPage() {
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 600, color: '#111827' }}>{p.name}</td>
                     <td style={{ padding: '11px 14px', fontFamily: 'monospace', fontSize: 12, color: '#475569' }}>{p.sku}</td>
                     <td style={{ padding: '11px 14px' }}>
-                      <span className={`badge ${p.category === 'Medical' ? 'badge-info' : 'badge-purple'}`}>{p.category}</span>
+                      <span className="badge badge-info">{p.category}</span>
                     </td>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 700, color: p.stock_quantity === 0 ? '#EF4444' : '#0F172A' }}>
                       {p.stock_quantity.toLocaleString()}

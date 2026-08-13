@@ -45,9 +45,14 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // Read session from cookie — fast, no network call; JWT is signature-verified locally
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  // Verify against the Auth server rather than getSession(): getSession() silently
+  // triggers its own token refresh once the access token is within 90s of expiry,
+  // racing the browser's independent auto-refresh timer for the same refresh_token.
+  // Supabase rotates the refresh token on each use, so whichever side loses that
+  // race gets an already-invalidated token and is forced signed out — surfacing as
+  // a blank dashboard roughly once an hour. getUser() only checks the existing
+  // token and never refreshes, leaving the browser client as the sole refresher.
+  const { data: { user } } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'

@@ -32,7 +32,7 @@ create table if not exists public.products (
   barcode text unique,
   qr_code text,
   brand text,
-  category text not null check (category in ('Medical', 'Detection')),
+  category text not null default 'General',
   description text,
   batch_number text,
   expiry_date date,

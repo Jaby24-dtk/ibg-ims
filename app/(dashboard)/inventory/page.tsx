@@ -31,7 +31,7 @@ export default function InventoryPage() {
   const [addForm, setAddForm] = useState({
     name: '', sku: '', barcode: '', brand: '', batch_number: '',
     expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '',
-    stock_quantity: '', category: 'Medical', description: '',
+    stock_quantity: '', category: 'General', description: '',
   })
   const [scanMode, setScanMode] = useState(false)
   const [showCamera, setShowCamera] = useState(false)
@@ -143,7 +143,7 @@ export default function InventoryPage() {
           sku,
           barcode: row.barcode || '',
           brand: row.brand || '',
-          category: cat === 'Detection' ? 'Detection' : 'Medical',
+          category: cat || 'General',
           description: row.description || '',
           batch_number: row.batch_number || row.batch || '',
           expiry_date: row.expiry_date || row.expiry || '',
@@ -167,7 +167,7 @@ export default function InventoryPage() {
 
   function downloadCsvTemplate() {
     const header = 'name,sku,barcode,brand,category,description,batch_number,expiry_date,unit_cost,selling_price,reorder_level,stock_quantity'
-    const sample = 'N95 Respirator Mask,MED-N95-001,8901234567890,SafeGuard,Medical,NIOSH-approved N95 mask,BN2025-001,2027-12-31,85,120,500,1000'
+    const sample = 'Sample Product,SKU-001,8901234567890,Sample Brand,General,Sample product description,BN2025-001,2027-12-31,85,120,500,1000'
     const blob = new Blob([header + '\n' + sample], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = 'ibg-products-template.csv'; a.click()
@@ -389,8 +389,9 @@ export default function InventoryPage() {
           </div>
           <select className="input-field" style={{ width: 160 }} value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
             <option value="All">All Categories</option>
-            <option value="Medical">Medical</option>
-            <option value="Detection">Detection</option>
+            {Array.from(new Set(products.map(p => p.category))).sort().map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
           </select>
           <select className="input-field" style={{ width: 160 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="All">All Status</option>
@@ -435,10 +436,10 @@ export default function InventoryPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div style={{
                         width: 38, height: 38, borderRadius: 10,
-                        background: p.category === 'Medical' ? '#E0F7FA' : '#EDE9FE',
+                        background: '#E0F7FA',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                       }}>
-                        <Package size={18} style={{ color: p.category === 'Medical' ? '#2FA6B8' : '#7C3AED' }} />
+                        <Package size={18} style={{ color: '#2FA6B8' }} />
                       </div>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{p.name}</div>
@@ -451,7 +452,7 @@ export default function InventoryPage() {
                     <div style={{ fontSize: 11, color: '#94A3B8', fontFamily: 'monospace' }}>{p.barcode}</div>
                   </td>
                   <td style={{ padding: '14px 16px' }}>
-                    <span className={`badge ${p.category === 'Medical' ? 'badge-info' : 'badge-purple'}`}>
+                    <span className="badge badge-info">
                       {p.category}
                     </span>
                   </td>
@@ -642,14 +643,12 @@ export default function InventoryPage() {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Category</label>
-                <select
+                <input
                   className="input-field"
+                  placeholder="General"
                   value={addForm.category}
                   onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
-                >
-                  <option value="Medical">Medical</option>
-                  <option value="Detection">Detection</option>
-                </select>
+                />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Description</label>
@@ -674,7 +673,7 @@ export default function InventoryPage() {
                       sku: addForm.sku.trim(),
                       barcode: addForm.barcode.trim(),
                       brand: addForm.brand.trim(),
-                      category: addForm.category as 'Medical' | 'Detection',
+                      category: addForm.category.trim() || 'General',
                       description: addForm.description.trim(),
                       batch_number: addForm.batch_number.trim(),
                       expiry_date: addForm.expiry_date,
@@ -688,7 +687,7 @@ export default function InventoryPage() {
                       updated_at: new Date().toISOString(),
                     }
                     setProducts(prev => [newProduct, ...prev])
-                    setAddForm({ name: '', sku: '', barcode: '', brand: '', batch_number: '', expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '', stock_quantity: '', category: 'Medical', description: '' })
+                    setAddForm({ name: '', sku: '', barcode: '', brand: '', batch_number: '', expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '', stock_quantity: '', category: 'General', description: '' })
                     setShowAddModal(false)
                   }}
                 >
@@ -758,7 +757,7 @@ export default function InventoryPage() {
                           <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>{r.name}</td>
                           <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#374151' }}>{r.sku}</td>
                           <td style={{ padding: '10px 12px' }}>
-                            <span className={`badge ${r.category === 'Detection' ? 'badge-purple' : 'badge-info'}`}>{r.category}</span>
+                            <span className="badge badge-info">{r.category}</span>
                           </td>
                           <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.brand || '—'}</td>
                           <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0F172A' }}>{r.stock_quantity ?? 0}</td>

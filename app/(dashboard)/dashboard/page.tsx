@@ -11,7 +11,8 @@ import { mockProducts, mockTransactions, mockAlerts } from '@/lib/mock-data'
 import { getStockStatus, getExpiryStatus } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, daysUntil } from '@/lib/utils'
 
-const COLORS = { Medical: '#2FA6B8', Detection: '#38BDF8' }
+const CATEGORY_PALETTE = ['#2FA6B8', '#38BDF8', '#6366F1', '#7C3AED', '#F59E0B', '#22C55E']
+const categoryColor = (index: number) => CATEGORY_PALETTE[index % CATEGORY_PALETTE.length]
 const STATUS_COLORS = { 'In Stock': '#22C55E', 'Low Stock': '#F59E0B', 'Out of Stock': '#EF4444' }
 
 export default function DashboardPage() {
@@ -147,8 +148,8 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={categoryData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
-                  {categoryData.map(({ name }) => (
-                    <Cell key={name} fill={COLORS[name as keyof typeof COLORS] ?? '#CBD5E1'} />
+                  {categoryData.map(({ name }, i) => (
+                    <Cell key={name} fill={categoryColor(i)} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(v) => [`${v} products`, '']} />
@@ -156,9 +157,9 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </div>
           <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 8 }}>
-            {categoryData.map(({ name, value }) => (
+            {categoryData.map(({ name, value }, i) => (
               <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: COLORS[name as keyof typeof COLORS] }} />
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: categoryColor(i) }} />
                 <span style={{ fontSize: 12, color: '#475569', fontWeight: 500 }}>{name} ({value})</span>
               </div>
             ))}

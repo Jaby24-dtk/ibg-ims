@@ -137,8 +137,8 @@ export default function LoginPage() {
 
           <div style={{ marginTop: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
             {[
-              { icon: '🏥', title: 'Medical Products', desc: 'PPE, diagnostics, health equipment' },
-              { icon: '🔍', title: 'Detection Products', desc: 'Security scanners, test kits' },
+              { icon: '📦', title: 'Stock Tracking', desc: 'Live inventory levels across all products' },
+              { icon: '🧾', title: 'Purchase Orders', desc: 'Manage suppliers and restocking' },
               { icon: '📊', title: 'Real-time Analytics', desc: 'Stock levels, expiry tracking' },
             ].map(({ icon, title, desc }) => (
               <div key={title} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>

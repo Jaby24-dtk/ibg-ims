@@ -17,7 +17,7 @@ export interface Supplier {
   address: string
 }
 
-export type ProductCategory = 'Medical' | 'Detection'
+export type ProductCategory = string
 export type StockStatus = 'In Stock' | 'Low Stock' | 'Out of Stock'
 
 export interface Product {
