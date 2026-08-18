@@ -157,6 +157,8 @@ export default function InventoryPage() {
           quantity: i.quantity,
           user_id: user?.id ?? null,
           notes: i.action === 'sample' ? 'Given out as sample' : 'Scanned via IMS barcode scanner',
+          unit_cost: i.product!.unit_cost,
+          selling_price: i.product!.selling_price,
         }))
         const { error: txError } = await sb.from('transactions').insert(txRows)
         if (txError) throw txError
@@ -237,6 +239,7 @@ export default function InventoryPage() {
       const { error: txError } = await sb.from('transactions').insert({
         product_id: p.id, sku: p.sku, barcode: p.barcode, type: 'sample',
         quantity: qty, user_id: user?.id ?? null, notes: 'Marked as sample product',
+        unit_cost: p.unit_cost, selling_price: p.selling_price,
       })
       if (txError) { setSampleError(txError.message); return }
     }

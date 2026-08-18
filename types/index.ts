@@ -61,6 +61,12 @@ export interface Transaction {
   user?: User
   product?: Product
   notes?: string
+  /** Product's unit_cost at the moment of this transaction — snapshotted so later price
+   *  edits don't retroactively change historical profit figures. Null on rows created
+   *  before this column existed; callers should fall back to the product's current price. */
+  unit_cost?: number | null
+  /** Same snapshotting as unit_cost, for selling_price. */
+  selling_price?: number | null
   created_at: string
 }
 

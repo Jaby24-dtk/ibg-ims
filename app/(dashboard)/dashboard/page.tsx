@@ -25,7 +25,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
   const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions.slice(0, 6))
-  const [outboundTx, setOutboundTx] = useState<Pick<Transaction, 'product_id' | 'quantity'>[]>(
+  const [outboundTx, setOutboundTx] = useState<Pick<Transaction, 'product_id' | 'quantity' | 'unit_cost' | 'selling_price'>[]>(
     supabaseConfigured ? [] : mockTransactions.filter(t => t.type === 'outbound')
   )
 
@@ -37,7 +37,7 @@ export default function DashboardPage() {
       const [productsRes, txRes, outboundRes] = await Promise.all([
         sb.from('products').select('*'),
         sb.from('transactions').select('*').order('created_at', { ascending: false }).limit(6),
-        sb.from('transactions').select('product_id, quantity').eq('type', 'outbound'),
+        sb.from('transactions').select('product_id, quantity, unit_cost, selling_price').eq('type', 'outbound'),
       ])
       if (cancelled) return
       if (productsRes.error) console.error('Failed to load products:', productsRes.error)
@@ -45,7 +45,7 @@ export default function DashboardPage() {
       if (txRes.error) console.error('Failed to load transactions:', txRes.error)
       else setTransactions((txRes.data ?? []) as Transaction[])
       if (outboundRes.error) console.error('Failed to load sales:', outboundRes.error)
-      else setOutboundTx((outboundRes.data ?? []) as Pick<Transaction, 'product_id' | 'quantity'>[])
+      else setOutboundTx((outboundRes.data ?? []) as Pick<Transaction, 'product_id' | 'quantity' | 'unit_cost' | 'selling_price'>[])
     })()
     return () => { cancelled = true }
   }, [])
@@ -62,7 +62,9 @@ export default function DashboardPage() {
     const productsById = new Map(products.map(p => [p.id, p]))
     const totalActualProfit = outboundTx.reduce((s, tx) => {
       const p = productsById.get(tx.product_id)
-      return p ? s + tx.quantity * (p.selling_price - p.unit_cost) : s
+      const sellingPrice = tx.selling_price ?? p?.selling_price
+      const unitCost = tx.unit_cost ?? p?.unit_cost
+      return sellingPrice != null && unitCost != null ? s + tx.quantity * (sellingPrice - unitCost) : s
     }, 0)
     return { totalSKUs, totalUnits, lowOrOut, totalValue, totalPotentialProfit, totalActualProfit }
   }, [products, outboundTx])

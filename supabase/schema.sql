@@ -78,6 +78,11 @@ create table if not exists public.transactions (
   quantity integer not null,
   user_id uuid references public.users(id),
   notes text,
+  -- Snapshot of the product's price at the moment of this transaction, so editing a
+  -- product's price later doesn't retroactively change historical profit figures.
+  -- Null on rows from before this column existed.
+  unit_cost numeric(12,2),
+  selling_price numeric(12,2),
   created_at timestamptz default now()
 );
 

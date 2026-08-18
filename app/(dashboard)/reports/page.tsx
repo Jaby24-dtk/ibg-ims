@@ -105,9 +105,14 @@ export default function ReportsPage() {
     for (const tx of transactions) {
       if (tx.type !== 'outbound') continue
       const p = productsById.get(tx.product_id)
-      if (!p) continue
-      revenue += tx.quantity * p.selling_price
-      profit += tx.quantity * (p.selling_price - p.unit_cost)
+      // Prefer the price snapshotted on the transaction at time of sale, so a later
+      // price edit doesn't retroactively change historical figures. Rows from before
+      // that column existed fall back to the product's current price.
+      const sellingPrice = tx.selling_price ?? p?.selling_price
+      const unitCost = tx.unit_cost ?? p?.unit_cost
+      if (sellingPrice == null || unitCost == null) continue
+      revenue += tx.quantity * sellingPrice
+      profit += tx.quantity * (sellingPrice - unitCost)
       units += tx.quantity
     }
     return { actualRevenue: revenue, actualProfit: profit, unitsSold: units }
