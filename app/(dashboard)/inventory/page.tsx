@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Plus, Upload, Download, Scan, Search, X, Package,
-  Eye, Edit2, AlertTriangle, CheckCircle, Camera,
+  Eye, Edit2, AlertTriangle, CheckCircle, Camera, Gift,
 } from 'lucide-react'
 import { mockProducts, mockSuppliers } from '@/lib/mock-data'
 import { getStockStatus, getExpiryStatus, type Product } from '@/types'
@@ -23,7 +23,7 @@ type ScannedItem = {
   product: Product | null
   barcode: string
   quantity: number
-  action: 'receive' | 'outbound' | 'adjust'
+  action: 'receive' | 'outbound' | 'adjust' | 'sample'
   scannedAt: string
   found: boolean
 }
@@ -41,6 +41,15 @@ export default function InventoryPage() {
     expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '',
     stock_quantity: '', category: 'General', description: '',
   })
+  const [sampleQty, setSampleQty] = useState('1')
+  const [sampleError, setSampleError] = useState('')
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [editForm, setEditForm] = useState({
+    name: '', sku: '', barcode: '', brand: '', batch_number: '',
+    expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '',
+    stock_quantity: '', category: 'General', description: '',
+  })
+  const [editError, setEditError] = useState('')
   const [scanMode, setScanMode] = useState(false)
   const [showCamera, setShowCamera] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -127,7 +136,7 @@ export default function InventoryPage() {
       let qty = p.stock_quantity
       for (const i of items) {
         if (i.action === 'receive') qty += i.quantity
-        else if (i.action === 'outbound') qty = Math.max(0, qty - i.quantity)
+        else if (i.action === 'outbound' || i.action === 'sample') qty = Math.max(0, qty - i.quantity)
         else qty = i.quantity
       }
       newQty.set(p.id, qty)
@@ -144,10 +153,10 @@ export default function InventoryPage() {
           product_id: i.product!.id,
           sku: i.product!.sku,
           barcode: i.barcode,
-          type: i.action === 'receive' ? 'inbound' : i.action === 'outbound' ? 'outbound' : 'adjustment',
+          type: i.action === 'receive' ? 'inbound' : i.action === 'outbound' ? 'outbound' : i.action === 'sample' ? 'sample' : 'adjustment',
           quantity: i.quantity,
           user_id: user?.id ?? null,
-          notes: 'Scanned via IMS barcode scanner',
+          notes: i.action === 'sample' ? 'Given out as sample' : 'Scanned via IMS barcode scanner',
         }))
         const { error: txError } = await sb.from('transactions').insert(txRows)
         if (txError) throw txError
@@ -163,6 +172,79 @@ export default function InventoryPage() {
     setScanFeedback({ type: 'success', msg: 'Transactions saved!' })
     setTimeout(() => setScanFeedback({ type: null, msg: '' }), 3000)
   }, [scannedItems, products, user])
+
+  const openEditModal = (p: Product) => {
+    setEditError('')
+    setEditForm({
+      name: p.name, sku: p.sku, barcode: p.barcode, brand: p.brand,
+      batch_number: p.batch_number, expiry_date: p.expiry_date,
+      unit_cost: String(p.unit_cost), selling_price: String(p.selling_price),
+      reorder_level: String(p.reorder_level), stock_quantity: String(p.stock_quantity),
+      category: p.category, description: p.description,
+    })
+    setEditingProduct(p)
+  }
+
+  const saveEditedProduct = async () => {
+    if (!editingProduct || !editForm.name.trim() || !editForm.sku.trim()) return
+    setEditError('')
+    const payload = {
+      name: editForm.name.trim(),
+      sku: editForm.sku.trim(),
+      barcode: editForm.barcode.trim() || null,
+      brand: editForm.brand.trim(),
+      category: editForm.category.trim() || 'General',
+      description: editForm.description.trim(),
+      batch_number: editForm.batch_number.trim(),
+      expiry_date: editForm.expiry_date || null,
+      unit_cost: parseFloat(editForm.unit_cost) || 0,
+      selling_price: parseFloat(editForm.selling_price) || 0,
+      reorder_level: parseInt(editForm.reorder_level) || 0,
+      stock_quantity: parseInt(editForm.stock_quantity) || 0,
+    }
+
+    let updated: Product
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { data, error } = await sb.from('products').update(payload).eq('id', editingProduct.id).select().single()
+      if (error) { setEditError(error.message); return }
+      updated = data as Product
+    } else {
+      updated = {
+        ...editingProduct,
+        ...payload,
+        barcode: payload.barcode ?? '',
+        expiry_date: payload.expiry_date ?? '',
+        updated_at: new Date().toISOString(),
+      }
+    }
+
+    setProducts(prev => prev.map(p => p.id === updated.id ? updated : p))
+    setEditingProduct(null)
+  }
+
+  const markAsSample = async (p: Product) => {
+    const qty = parseInt(sampleQty) || 0
+    if (qty <= 0) { setSampleError('Enter a quantity greater than 0.'); return }
+    if (qty > p.stock_quantity) { setSampleError(`Only ${p.stock_quantity} unit${p.stock_quantity === 1 ? '' : 's'} in stock.`); return }
+    setSampleError('')
+    const newStock = p.stock_quantity - qty
+
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { error: updateError } = await sb.from('products').update({ stock_quantity: newStock }).eq('id', p.id)
+      if (updateError) { setSampleError(updateError.message); return }
+      const { error: txError } = await sb.from('transactions').insert({
+        product_id: p.id, sku: p.sku, barcode: p.barcode, type: 'sample',
+        quantity: qty, user_id: user?.id ?? null, notes: 'Marked as sample product',
+      })
+      if (txError) { setSampleError(txError.message); return }
+    }
+
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock_quantity: newStock } : x))
+    setShowDetailModal(prev => (prev && prev.id === p.id ? { ...prev, stock_quantity: newStock } : prev))
+    setSampleQty('1')
+  }
 
   const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -399,6 +481,7 @@ export default function InventoryPage() {
                               <option value="receive">Receive</option>
                               <option value="outbound">Outbound</option>
                               <option value="adjust">Adjust</option>
+                              <option value="sample">Sample</option>
                             </select>
                             <input
                               type="number"
@@ -552,7 +635,7 @@ export default function InventoryPage() {
                       </button>
                       {canEdit(role) && (
                         <button
-                          onClick={() => setShowDetailModal(p)}
+                          onClick={() => openEditModal(p)}
                           style={{
                             width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0',
                             background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -663,9 +746,44 @@ export default function InventoryPage() {
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Description</div>
                 <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>{showDetailModal.description}</div>
               </div>
+              {canEdit(role) && showDetailModal.stock_quantity > 0 && (
+                <div style={{ marginTop: 16, padding: '12px 14px', background: '#FDF4FF', borderRadius: 10, border: '1px solid #F3E8FF' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#7C3AED', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Gift size={13} /> Mark as Sample
+                  </div>
+                  <p style={{ fontSize: 12, color: '#64748B', marginBottom: 10 }}>
+                    Give out units as a free sample — reduces stock and logs a &quot;Sample&quot; movement, separate from sales.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={showDetailModal.stock_quantity}
+                      className="input-field"
+                      style={{ width: 90 }}
+                      value={sampleQty}
+                      onChange={e => setSampleQty(e.target.value)}
+                    />
+                    <span style={{ fontSize: 12, color: '#94A3B8' }}>of {showDetailModal.stock_quantity} units</span>
+                    <button className="btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => markAsSample(showDetailModal)}>
+                      <Gift size={13} /> Mark as Sample
+                    </button>
+                  </div>
+                  {sampleError && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#991B1B' }}>{sampleError}</div>
+                  )}
+                </div>
+              )}
               <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button className="btn-secondary btn-sm" onClick={() => setShowDetailModal(null)}>Close</button>
-                {canEdit(role) && <button className="btn-primary btn-sm"><Edit2 size={14} /> Edit Product</button>}
+                <button className="btn-secondary btn-sm" onClick={() => { setShowDetailModal(null); setSampleError(''); setSampleQty('1') }}>Close</button>
+                {canEdit(role) && (
+                  <button
+                    className="btn-primary btn-sm"
+                    onClick={() => { openEditModal(showDetailModal); setShowDetailModal(null) }}
+                  >
+                    <Edit2 size={14} /> Edit Product
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -778,6 +896,78 @@ export default function InventoryPage() {
                   }}
                 >
                   <Plus size={14} /> Add Product
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {editingProduct && (
+        <div className="modal-overlay" onClick={() => setEditingProduct(null)}>
+          <div className="modal-box" style={{ width: 620, padding: 0 }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A' }}>Edit Product</h2>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', padding: 4 }} onClick={() => setEditingProduct(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {([
+                  { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text' },
+                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text' },
+                  { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text' },
+                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text' },
+                  { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text' },
+                  { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date' },
+                  { label: 'Unit Cost (Buying Price)', key: 'unit_cost', placeholder: '0.00', type: 'number' },
+                  { label: 'Selling Price', key: 'selling_price', placeholder: '0.00', type: 'number' },
+                  { label: 'Reorder Level', key: 'reorder_level', placeholder: '0', type: 'number' },
+                  { label: 'Current Stock', key: 'stock_quantity', placeholder: '0', type: 'number' },
+                ] as const).map(({ label, key, placeholder, type }) => (
+                  <div key={key}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
+                    <input
+                      type={type}
+                      className="input-field"
+                      placeholder={placeholder}
+                      value={editForm[key]}
+                      onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Category</label>
+                <input
+                  className="input-field"
+                  placeholder="General"
+                  value={editForm.category}
+                  onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Description</label>
+                <textarea
+                  className="input-field"
+                  rows={3}
+                  placeholder="Product description..."
+                  style={{ resize: 'vertical' }}
+                  value={editForm.description}
+                  onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                />
+              </div>
+              {editError && (
+                <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B' }}>
+                  {editError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #F1F5F9' }}>
+                <button className="btn-secondary btn-sm" onClick={() => setEditingProduct(null)}>Cancel</button>
+                <button className="btn-primary btn-sm" onClick={saveEditedProduct}>
+                  <CheckCircle size={14} /> Save Changes
                 </button>
               </div>
             </div>

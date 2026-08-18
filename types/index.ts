@@ -48,6 +48,7 @@ export type TransactionType =
   | 'adjustment'
   | 'barcode_scan'
   | 'purchase_order_received'
+  | 'sample'
 
 export interface Transaction {
   id: string

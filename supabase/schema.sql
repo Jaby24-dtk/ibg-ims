@@ -74,7 +74,7 @@ create table if not exists public.transactions (
   product_id uuid references public.products(id),
   sku text,
   barcode text,
-  type text not null check (type in ('inbound','outbound','adjustment','barcode_scan','purchase_order_received')),
+  type text not null check (type in ('inbound','outbound','adjustment','barcode_scan','purchase_order_received','sample')),
   quantity integer not null,
   user_id uuid references public.users(id),
   notes text,

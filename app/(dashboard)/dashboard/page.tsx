@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Package, TrendingUp, AlertTriangle, DollarSign,
-  ChevronRight, ArrowUpRight, ArrowDownRight, Clock,
+  ChevronRight, ArrowUpRight, ArrowDownRight, Clock, Wallet,
 } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Legend } from 'recharts'
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
@@ -52,7 +52,8 @@ export default function DashboardPage() {
       return s === 'Low Stock' || s === 'Out of Stock'
     }).length
     const totalValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
-    return { totalSKUs, totalUnits, lowOrOut, totalValue }
+    const totalPotentialProfit = products.reduce((s, p) => s + p.stock_quantity * (p.selling_price - p.unit_cost), 0)
+    return { totalSKUs, totalUnits, lowOrOut, totalValue, totalPotentialProfit }
   }, [products])
 
   const categoryData = useMemo(() => {
@@ -122,7 +123,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
         {[
           {
             icon: Package, label: 'Total SKUs', value: kpis.totalSKUs,
@@ -139,6 +140,10 @@ export default function DashboardPage() {
           {
             icon: DollarSign, label: 'Total Inventory Value', value: formatCurrency(kpis.totalValue),
             sub: 'Cost value on hand', color: '#6366F1', bg: '#EDE9FE', trend: `${formatCurrency(kpis.totalValue)} on hand`,
+          },
+          {
+            icon: Wallet, label: 'Potential Profit', value: formatCurrency(kpis.totalPotentialProfit),
+            sub: 'Selling − buying price, on hand', color: '#EC4899', bg: '#FCE7F3', trend: `${formatCurrency(kpis.totalPotentialProfit)} if all sold`,
           },
         ].map(({ icon: Icon, label, value, sub, color, bg, trend }) => (
           <div key={label} className="kpi-card" style={{ position: 'relative', overflow: 'hidden' }}>

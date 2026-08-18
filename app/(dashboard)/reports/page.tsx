@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { FileText, Download, TrendingUp, Package, AlertTriangle, Clock } from 'lucide-react'
+import { FileText, Download, TrendingUp, Package, AlertTriangle, Clock, Wallet } from 'lucide-react'
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { useRole, canExport } from '@/lib/use-role'
 import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
@@ -26,7 +26,7 @@ function exportToCsv(filename: string, rows: string[][]): void {
 }
 
 const COLORS = ['#22C55E', '#F59E0B', '#EF4444']
-const TX_COLORS = { inbound: '#22C55E', outbound: '#38BDF8', adjustment: '#F59E0B', barcode_scan: '#7C3AED', purchase_order_received: '#2FA6B8' }
+const TX_COLORS = { inbound: '#22C55E', outbound: '#38BDF8', adjustment: '#F59E0B', barcode_scan: '#7C3AED', purchase_order_received: '#2FA6B8', sample: '#EC4899' }
 
 export default function ReportsPage() {
   const role = useRole()
@@ -97,6 +97,7 @@ export default function ReportsPage() {
   }, [transactions])
 
   const totalInventoryValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
+  const totalPotentialProfit = products.reduce((s, p) => s + p.stock_quantity * (p.selling_price - p.unit_cost), 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -109,11 +110,12 @@ export default function ReportsPage() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-secondary btn-sm" onClick={() => {
               const rows = [
-                ['Product', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Total Value', 'Status', 'Expiry Date'],
+                ['Product', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Selling Price', 'Total Value', 'Potential Profit', 'Status', 'Expiry Date'],
                 ...products.map(p => [
                   p.name, p.sku, p.category, p.brand,
-                  String(p.stock_quantity), String(p.unit_cost),
+                  String(p.stock_quantity), String(p.unit_cost), String(p.selling_price),
                   String(p.stock_quantity * p.unit_cost),
+                  String(p.stock_quantity * (p.selling_price - p.unit_cost)),
                   getStockStatus(p), p.expiry_date,
                 ])
               ]
@@ -129,9 +131,10 @@ export default function ReportsPage() {
       </div>
 
       {/* Summary KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
         {[
           { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), icon: TrendingUp, color: '#2FA6B8', bg: '#E0F7FA' },
+          { label: 'Potential Profit', value: formatCurrency(totalPotentialProfit), icon: Wallet, color: '#EC4899', bg: '#FCE7F3' },
           { label: 'Products In Stock', value: stockStatus[0].value, icon: Package, color: '#22C55E', bg: '#DCFCE7' },
           { label: 'Low / Out of Stock', value: stockStatus[1].value + stockStatus[2].value, icon: AlertTriangle, color: '#F59E0B', bg: '#FEF3C7' },
           { label: 'Total Transactions', value: transactions.length, icon: Clock, color: '#6366F1', bg: '#EDE9FE' },
@@ -245,11 +248,12 @@ export default function ReportsPage() {
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Full Stock Report</h3>
           {canExport(role) && <button className="btn-secondary btn-sm" onClick={() => {
             const rows = [
-              ['Product', 'SKU', 'Category', 'Brand', 'Stock Qty', 'Unit Cost (PHP)', 'Total Value (PHP)', 'Reorder Level', 'Expiry Date', 'Status'],
+              ['Product', 'SKU', 'Category', 'Brand', 'Stock Qty', 'Unit Cost (PHP)', 'Selling Price (PHP)', 'Total Value (PHP)', 'Potential Profit (PHP)', 'Reorder Level', 'Expiry Date', 'Status'],
               ...[...products].sort((a,b) => (b.stock_quantity*b.unit_cost)-(a.stock_quantity*a.unit_cost)).map(p => [
                 p.name, p.sku, p.category, p.brand,
-                String(p.stock_quantity), String(p.unit_cost),
+                String(p.stock_quantity), String(p.unit_cost), String(p.selling_price),
                 String(p.stock_quantity * p.unit_cost),
+                String(p.stock_quantity * (p.selling_price - p.unit_cost)),
                 String(p.reorder_level), p.expiry_date, getStockStatus(p),
               ])
             ]
@@ -262,7 +266,7 @@ export default function ReportsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-                {['Product', 'SKU', 'Category', 'Stock', 'Unit Cost', 'Total Value', 'Status', 'Expiry'].map(col => (
+                {['Product', 'SKU', 'Category', 'Stock', 'Unit Cost', 'Selling Price', 'Total Value', 'Potential Profit', 'Status', 'Expiry'].map(col => (
                   <th key={col} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                     {col}
                   </th>
@@ -273,6 +277,7 @@ export default function ReportsPage() {
               {[...products].sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost)).map((p, i, arr) => {
                 const s = getStockStatus(p)
                 const e = getExpiryStatus(p.expiry_date)
+                const profit = p.stock_quantity * (p.selling_price - p.unit_cost)
                 return (
                   <tr key={p.id} className="table-row-hover" style={{ borderBottom: i < arr.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 600, color: '#111827' }}>{p.name}</td>
@@ -284,8 +289,12 @@ export default function ReportsPage() {
                       {p.stock_quantity.toLocaleString()}
                     </td>
                     <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatCurrency(p.unit_cost)}</td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatCurrency(p.selling_price)}</td>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
                       {formatCurrency(p.stock_quantity * p.unit_cost)}
+                    </td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 700, color: profit < 0 ? '#EF4444' : '#16A34A' }}>
+                      {formatCurrency(profit)}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       <span className={`badge ${s === 'In Stock' ? 'badge-success' : s === 'Low Stock' ? 'badge-warning' : 'badge-danger'}`}>{s}</span>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ArrowLeftRight, ArrowDown, ArrowUp, SlidersHorizontal, Scan, Search, X, FileText } from 'lucide-react'
+import { ArrowLeftRight, ArrowDown, ArrowUp, SlidersHorizontal, Scan, Search, X, FileText, Gift } from 'lucide-react'
 import { mockTransactions, mockProducts, mockUsers } from '@/lib/mock-data'
 import { formatDateTime } from '@/lib/utils'
 import { useRole, canExport } from '@/lib/use-role'
@@ -19,6 +19,7 @@ const typeConfig: Record<string, { label: string; badge: string; icon: React.Ele
   adjustment:             { label: 'Adjustment', badge: 'badge-warning', icon: SlidersHorizontal, color: '#F59E0B' },
   barcode_scan:           { label: 'Barcode Scan', badge: 'badge-purple', icon: Scan, color: '#7C3AED' },
   purchase_order_received:{ label: 'PO Received', badge: 'badge-success', icon: ArrowDown, color: '#22C55E' },
+  sample:                 { label: 'Sample', badge: 'badge-purple', icon: Gift, color: '#EC4899' },
 }
 
 export default function StockMovementsPage() {
@@ -71,6 +72,7 @@ export default function StockMovementsPage() {
     outbound: transactions.filter(t => t.type === 'outbound').reduce((s, t) => s + Math.abs(t.quantity), 0),
     adjustments: transactions.filter(t => t.type === 'adjustment').length,
     scans: transactions.filter(t => t.type === 'barcode_scan').length,
+    samples: transactions.filter(t => t.type === 'sample').reduce((s, t) => s + Math.abs(t.quantity), 0),
   }
 
   return (
@@ -110,12 +112,13 @@ export default function StockMovementsPage() {
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
         {[
           { label: 'Inbound Stock', value: summary.inbound, color: '#22C55E', bg: '#DCFCE7', icon: ArrowDown },
           { label: 'Outbound Stock', value: summary.outbound, color: '#38BDF8', bg: '#E0F2FE', icon: ArrowUp },
           { label: 'Adjustments', value: summary.adjustments, color: '#F59E0B', bg: '#FEF3C7', icon: SlidersHorizontal },
           { label: 'Barcode Scans', value: summary.scans, color: '#7C3AED', bg: '#EDE9FE', icon: Scan },
+          { label: 'Given as Samples', value: summary.samples, color: '#EC4899', bg: '#FCE7F3', icon: Gift },
         ].map(({ label, value, color, bg, icon: Icon }) => (
           <div key={label} className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -143,6 +146,7 @@ export default function StockMovementsPage() {
             <option value="adjustment">Adjustment</option>
             <option value="barcode_scan">Barcode Scan</option>
             <option value="purchase_order_received">PO Received</option>
+            <option value="sample">Sample</option>
           </select>
           {(search || typeFilter !== 'All') && (
             <button className="btn-secondary btn-sm" onClick={() => { setSearch(''); setTypeFilter('All') }}>
@@ -190,9 +194,9 @@ export default function StockMovementsPage() {
                     <td style={{ padding: '12px 16px' }}>
                       <span style={{
                         fontSize: 14, fontWeight: 700,
-                        color: tx.type === 'outbound' ? '#EF4444' : tx.quantity < 0 ? '#EF4444' : '#22C55E',
+                        color: tx.type === 'outbound' || tx.type === 'sample' ? '#EF4444' : tx.quantity < 0 ? '#EF4444' : '#22C55E',
                       }}>
-                        {tx.quantity > 0 && tx.type !== 'outbound' ? '+' : ''}{tx.quantity}
+                        {tx.type === 'outbound' || tx.type === 'sample' ? '-' : tx.quantity > 0 ? '+' : ''}{Math.abs(tx.quantity)}
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: 12, color: '#374151', whiteSpace: 'nowrap' }}>
