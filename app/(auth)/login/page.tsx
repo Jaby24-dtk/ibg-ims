@@ -75,11 +75,11 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient()
-      // Clear any stale local session first. A leftover invalid/expired refresh-token
-      // cookie from a previous session makes the middleware's getUser() check fail on
-      // every request (visible as repeated "Refresh Token Not Found" errors) and can
-      // block a fresh sign-in from ever taking effect — most reliably reproduced in
-      // Safari, where a stale SameSite=None; Partitioned cookie can otherwise linger.
+      // Defensive: clear any stale local session before signing in, so a leftover
+      // invalid refresh-token cookie from a previous session can't interfere. (The
+      // actual Safari "stuck signing in" bug was the Partitioned cookie attribute
+      // never persisting on direct visits — see lib/supabase/config.ts — but this
+      // is still good hygiene.)
       await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
       // Never let the button hang forever — surface a real error instead of an
       // infinite "Signing in..." spinner if the network call stalls.
