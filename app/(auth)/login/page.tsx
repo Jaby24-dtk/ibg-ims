@@ -75,7 +75,21 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient()
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+      // Clear any stale local session first. A leftover invalid/expired refresh-token
+      // cookie from a previous session makes the middleware's getUser() check fail on
+      // every request (visible as repeated "Refresh Token Not Found" errors) and can
+      // block a fresh sign-in from ever taking effect — most reliably reproduced in
+      // Safari, where a stale SameSite=None; Partitioned cookie can otherwise linger.
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+      // Never let the button hang forever — surface a real error instead of an
+      // infinite "Signing in..." spinner if the network call stalls.
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+      )
+      const { error: authError } = await Promise.race([
+        supabase.auth.signInWithPassword({ email, password }),
+        timeout,
+      ])
       if (authError) {
         recordFail()
         const mins = minutesLocked()
@@ -93,8 +107,12 @@ export default function LoginPage() {
         router.push('/dashboard')
         router.refresh()
       }
-    } catch {
-      setError('Something went wrong. Please try again.')
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message === 'TIMEOUT'
+          ? 'Sign-in is taking too long. Check your connection and try again.'
+          : 'Something went wrong. Please try again.'
+      )
       setLoading(false)
     }
   }
