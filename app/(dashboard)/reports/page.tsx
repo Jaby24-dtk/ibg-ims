@@ -17,6 +17,13 @@ const supabaseConfigured = (() => {
   return url.length > 0 && !url.includes('your-project-ref')
 })()
 
+function formatAxisCurrency(v: number): string {
+  if (v === 0) return '₱0'
+  if (Math.abs(v) < 1000) return `₱${v.toFixed(0)}`
+  const k = v / 1000
+  return `₱${(Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1))}k`
+}
+
 function exportToCsv(filename: string, rows: string[][]): void {
   const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -67,6 +74,7 @@ export default function ReportsPage() {
 
   const topByValue = useMemo(() =>
     [...products]
+      .filter(p => p.stock_quantity * p.unit_cost > 0)
       .sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost))
       .slice(0, 8)
       .map(p => ({ name: p.name.length > 22 ? p.name.slice(0, 22) + '…' : p.name, value: p.stock_quantity * p.unit_cost })),
@@ -227,16 +235,22 @@ export default function ReportsPage() {
             <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>Top Products by Inventory Value</h3>
             <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Highest-value items on hand (cost × qty)</p>
           </div>
-          <div style={{ height: 280 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topByValue} layout="vertical" barSize={18}>
-                <XAxis type="number" tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#374151' }} axisLine={false} tickLine={false} width={130} />
-                <Tooltip formatter={(v) => [formatCurrency(Number(v)), 'Value']} cursor={{ fill: '#F8FAFC' }} />
-                <Bar dataKey="value" fill="#2FA6B8" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {topByValue.length === 0 ? (
+            <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#94A3B8', fontSize: 13, padding: '0 24px' }}>
+              No products have a buying price set yet — edit a product on the Inventory page to see it here.
+            </div>
+          ) : (
+            <div style={{ height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topByValue} layout="vertical" barSize={18}>
+                  <XAxis type="number" tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#374151' }} axisLine={false} tickLine={false} width={130} />
+                  <Tooltip formatter={(v) => [formatCurrency(Number(v)), 'Value']} cursor={{ fill: '#F8FAFC' }} />
+                  <Bar dataKey="value" fill="#2FA6B8" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Transaction Volume */}
