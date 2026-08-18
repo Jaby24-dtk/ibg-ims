@@ -1,10 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowLeftRight, ArrowDown, ArrowUp, SlidersHorizontal, Scan, Search, X, FileText } from 'lucide-react'
 import { mockTransactions, mockProducts, mockUsers } from '@/lib/mock-data'
 import { formatDateTime } from '@/lib/utils'
 import { useRole, canExport } from '@/lib/use-role'
+import { createClient } from '@/lib/supabase/client'
+import type { Product, Transaction, User } from '@/types'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 const typeConfig: Record<string, { label: string; badge: string; icon: React.ElementType; color: string }> = {
   inbound:                { label: 'Receive', badge: 'badge-success', icon: ArrowDown, color: '#22C55E' },
@@ -18,11 +25,35 @@ export default function StockMovementsPage() {
   const role = useRole()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
+  const [rawTransactions, setRawTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions)
+  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [users, setUsers] = useState<User[]>(supabaseConfigured ? [] : mockUsers)
 
-  const transactions = mockTransactions.map(tx => ({
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const [txRes, productsRes, usersRes] = await Promise.all([
+        sb.from('transactions').select('*').order('created_at', { ascending: false }),
+        sb.from('products').select('*'),
+        sb.from('users').select('*'),
+      ])
+      if (cancelled) return
+      if (txRes.error) console.error('Failed to load transactions:', txRes.error)
+      else setRawTransactions((txRes.data ?? []) as Transaction[])
+      if (productsRes.error) console.error('Failed to load products:', productsRes.error)
+      else setProducts((productsRes.data ?? []) as Product[])
+      if (usersRes.error) console.error('Failed to load users:', usersRes.error)
+      else setUsers((usersRes.data ?? []) as User[])
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const transactions = rawTransactions.map(tx => ({
     ...tx,
-    product: mockProducts.find(p => p.id === tx.product_id),
-    user: mockUsers.find(u => u.id === tx.user_id),
+    product: products.find(p => p.id === tx.product_id),
+    user: users.find(u => u.id === tx.user_id),
   }))
 
   const filtered = transactions.filter(tx => {

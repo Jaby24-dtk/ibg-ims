@@ -1,15 +1,21 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Package, TrendingUp, AlertTriangle, DollarSign,
   ChevronRight, ArrowUpRight, ArrowDownRight, Clock,
 } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Legend } from 'recharts'
-import { mockProducts, mockTransactions, mockAlerts } from '@/lib/mock-data'
-import { getStockStatus, getExpiryStatus } from '@/types'
+import { mockProducts, mockTransactions } from '@/lib/mock-data'
+import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, daysUntil } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 const CATEGORY_PALETTE = ['#2FA6B8', '#38BDF8', '#6366F1', '#7C3AED', '#F59E0B', '#22C55E']
 const categoryColor = (index: number) => CATEGORY_PALETTE[index % CATEGORY_PALETTE.length]
@@ -17,49 +23,70 @@ const STATUS_COLORS = { 'In Stock': '#22C55E', 'Low Stock': '#F59E0B', 'Out of S
 
 export default function DashboardPage() {
   const router = useRouter()
+  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions.slice(0, 6))
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const [productsRes, txRes] = await Promise.all([
+        sb.from('products').select('*'),
+        sb.from('transactions').select('*').order('created_at', { ascending: false }).limit(6),
+      ])
+      if (cancelled) return
+      if (productsRes.error) console.error('Failed to load products:', productsRes.error)
+      else setProducts((productsRes.data ?? []) as Product[])
+      if (txRes.error) console.error('Failed to load transactions:', txRes.error)
+      else setTransactions((txRes.data ?? []) as Transaction[])
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   const kpis = useMemo(() => {
-    const totalSKUs = mockProducts.length
-    const totalUnits = mockProducts.reduce((s, p) => s + p.stock_quantity, 0)
-    const lowOrOut = mockProducts.filter(p => {
+    const totalSKUs = products.length
+    const totalUnits = products.reduce((s, p) => s + p.stock_quantity, 0)
+    const lowOrOut = products.filter(p => {
       const s = getStockStatus(p)
       return s === 'Low Stock' || s === 'Out of Stock'
     }).length
-    const totalValue = mockProducts.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
+    const totalValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
     return { totalSKUs, totalUnits, lowOrOut, totalValue }
-  }, [])
+  }, [products])
 
   const categoryData = useMemo(() => {
     const counts: Record<string, number> = {}
-    for (const p of mockProducts) counts[p.category] = (counts[p.category] ?? 0) + 1
+    for (const p of products) counts[p.category] = (counts[p.category] ?? 0) + 1
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
-  }, [])
+  }, [products])
 
   const statusData = useMemo(() => {
     const counts: Record<string, number> = { 'In Stock': 0, 'Low Stock': 0, 'Out of Stock': 0 }
-    for (const p of mockProducts) counts[getStockStatus(p)]++
+    for (const p of products) counts[getStockStatus(p)]++
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
-  }, [])
+  }, [products])
 
   const lowStockProducts = useMemo(() =>
-    mockProducts.filter(p => {
+    products.filter(p => {
       const s = getStockStatus(p)
       return s === 'Low Stock' || s === 'Out of Stock'
     }).slice(0, 6),
-    []
+    [products]
   )
 
   const expiringProducts = useMemo(() =>
-    mockProducts
+    products
       .map(p => ({ ...p, expiryStatus: getExpiryStatus(p.expiry_date), days: daysUntil(p.expiry_date) }))
       .filter(p => p.expiryStatus !== 'safe')
       .sort((a, b) => a.days - b.days)
       .slice(0, 6),
-    []
+    [products]
   )
 
-  const recentTx = mockTransactions.slice(0, 6).map(tx => ({
+  const recentTx = transactions.map(tx => ({
     ...tx,
-    product: mockProducts.find(p => p.id === tx.product_id),
+    product: products.find(p => p.id === tx.product_id),
   }))
 
   const txTypeLabel: Record<string, string> = {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -8,8 +8,14 @@ import {
 import { FileText, Download, TrendingUp, Package, AlertTriangle, Clock } from 'lucide-react'
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { useRole, canExport } from '@/lib/use-role'
-import { getStockStatus, getExpiryStatus } from '@/types'
+import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
 import { formatCurrency } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 function exportToCsv(filename: string, rows: string[][]): void {
   const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n')
@@ -24,42 +30,63 @@ const TX_COLORS = { inbound: '#22C55E', outbound: '#38BDF8', adjustment: '#F59E0
 
 export default function ReportsPage() {
   const role = useRole()
+  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions)
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const [productsRes, txRes] = await Promise.all([
+        sb.from('products').select('*'),
+        sb.from('transactions').select('*').order('created_at', { ascending: false }),
+      ])
+      if (cancelled) return
+      if (productsRes.error) console.error('Failed to load products:', productsRes.error)
+      else setProducts((productsRes.data ?? []) as Product[])
+      if (txRes.error) console.error('Failed to load transactions:', txRes.error)
+      else setTransactions((txRes.data ?? []) as Transaction[])
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   const stockStatus = useMemo(() => {
     const data = [
       { name: 'In Stock', value: 0 },
       { name: 'Low Stock', value: 0 },
       { name: 'Out of Stock', value: 0 },
     ]
-    for (const p of mockProducts) {
+    for (const p of products) {
       const s = getStockStatus(p)
       const entry = data.find(d => d.name === s)
       if (entry) entry.value++
     }
     return data
-  }, [])
+  }, [products])
 
   const topByValue = useMemo(() =>
-    [...mockProducts]
+    [...products]
       .sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost))
       .slice(0, 8)
       .map(p => ({ name: p.name.length > 22 ? p.name.slice(0, 22) + '…' : p.name, value: p.stock_quantity * p.unit_cost })),
-    []
+    [products]
   )
 
   const expiryRisk = useMemo(() => {
     const counts = { expired: 0, critical: 0, warning: 0, safe: 0 }
-    for (const p of mockProducts) counts[getExpiryStatus(p.expiry_date)]++
+    for (const p of products) counts[getExpiryStatus(p.expiry_date)]++
     return [
       { name: 'Expired', value: counts.expired, color: '#EF4444' },
       { name: 'Critical (<14d)', value: counts.critical, color: '#F97316' },
       { name: 'Warning (<30d)', value: counts.warning, color: '#F59E0B' },
       { name: 'Safe (>30d)', value: counts.safe, color: '#22C55E' },
     ]
-  }, [])
+  }, [products])
 
   const txVolume = useMemo(() => {
     const counts: Record<string, number> = {}
-    for (const tx of mockTransactions) {
+    for (const tx of transactions) {
       counts[tx.type] = (counts[tx.type] ?? 0) + 1
     }
     return Object.entries(counts).map(([type, count]) => ({
@@ -67,9 +94,9 @@ export default function ReportsPage() {
       count,
       color: TX_COLORS[type as keyof typeof TX_COLORS] ?? '#CBD5E1',
     }))
-  }, [])
+  }, [transactions])
 
-  const totalInventoryValue = mockProducts.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
+  const totalInventoryValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -83,7 +110,7 @@ export default function ReportsPage() {
             <button className="btn-secondary btn-sm" onClick={() => {
               const rows = [
                 ['Product', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Total Value', 'Status', 'Expiry Date'],
-                ...mockProducts.map(p => [
+                ...products.map(p => [
                   p.name, p.sku, p.category, p.brand,
                   String(p.stock_quantity), String(p.unit_cost),
                   String(p.stock_quantity * p.unit_cost),
@@ -107,7 +134,7 @@ export default function ReportsPage() {
           { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), icon: TrendingUp, color: '#2FA6B8', bg: '#E0F7FA' },
           { label: 'Products In Stock', value: stockStatus[0].value, icon: Package, color: '#22C55E', bg: '#DCFCE7' },
           { label: 'Low / Out of Stock', value: stockStatus[1].value + stockStatus[2].value, icon: AlertTriangle, color: '#F59E0B', bg: '#FEF3C7' },
-          { label: 'Total Transactions', value: mockTransactions.length, icon: Clock, color: '#6366F1', bg: '#EDE9FE' },
+          { label: 'Total Transactions', value: transactions.length, icon: Clock, color: '#6366F1', bg: '#EDE9FE' },
         ].map(({ label, value, icon: Icon, color, bg }) => (
           <div key={label} className="card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
@@ -158,7 +185,7 @@ export default function ReportsPage() {
                 <div style={{ height: 8, borderRadius: 999, background: '#F1F5F9', overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: 999, background: color,
-                    width: `${mockProducts.length > 0 ? (value / mockProducts.length) * 100 : 0}%`,
+                    width: `${products.length > 0 ? (value / products.length) * 100 : 0}%`,
                     transition: 'width 0.5s ease',
                   }} />
                 </div>
@@ -203,7 +230,7 @@ export default function ReportsPage() {
                 <div style={{ width: 80, height: 6, borderRadius: 999, background: '#F1F5F9', overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: 999, background: color,
-                    width: `${(count / mockTransactions.length) * 100}%`,
+                    width: `${(count / transactions.length) * 100}%`,
                   }} />
                 </div>
               </div>
@@ -219,7 +246,7 @@ export default function ReportsPage() {
           {canExport(role) && <button className="btn-secondary btn-sm" onClick={() => {
             const rows = [
               ['Product', 'SKU', 'Category', 'Brand', 'Stock Qty', 'Unit Cost (PHP)', 'Total Value (PHP)', 'Reorder Level', 'Expiry Date', 'Status'],
-              ...[...mockProducts].sort((a,b) => (b.stock_quantity*b.unit_cost)-(a.stock_quantity*a.unit_cost)).map(p => [
+              ...[...products].sort((a,b) => (b.stock_quantity*b.unit_cost)-(a.stock_quantity*a.unit_cost)).map(p => [
                 p.name, p.sku, p.category, p.brand,
                 String(p.stock_quantity), String(p.unit_cost),
                 String(p.stock_quantity * p.unit_cost),
@@ -243,7 +270,7 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {[...mockProducts].sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost)).map((p, i, arr) => {
+              {[...products].sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost)).map((p, i, arr) => {
                 const s = getStockStatus(p)
                 const e = getExpiryStatus(p.expiry_date)
                 return (
