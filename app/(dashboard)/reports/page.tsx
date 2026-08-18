@@ -25,7 +25,7 @@ function exportToCsv(filename: string, rows: string[][]): void {
   URL.revokeObjectURL(url)
 }
 
-const COLORS = ['#22C55E', '#F59E0B', '#EF4444']
+const STATUS_COLORS: Record<string, string> = { 'In Stock': '#22C55E', 'Low Stock': '#F59E0B', 'Out of Stock': '#EF4444' }
 const TX_COLORS = { inbound: '#22C55E', outbound: '#38BDF8', adjustment: '#F59E0B', barcode_scan: '#7C3AED', purchase_order_received: '#2FA6B8', sample: '#EC4899' }
 
 export default function ReportsPage() {
@@ -162,8 +162,8 @@ export default function ReportsPage() {
           <div style={{ height: 240, display: 'flex', alignItems: 'center' }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={stockStatus} cx="50%" cy="50%" outerRadius={90} paddingAngle={3} dataKey="value" label={({ name, value }) => `${name}: ${value}`} labelLine={false}>
-                  {stockStatus.map((entry, i) => <Cell key={entry.name} fill={COLORS[i]} />)}
+                <Pie data={stockStatus.filter(d => d.value > 0)} cx="50%" cy="50%" outerRadius={90} paddingAngle={3} dataKey="value" label={({ name, value }) => `${name}: ${value}`} labelLine={false}>
+                  {stockStatus.filter(d => d.value > 0).map(entry => <Cell key={entry.name} fill={STATUS_COLORS[entry.name]} />)}
                 </Pie>
                 <Tooltip />
                 <Legend />
