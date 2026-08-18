@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { FileText, Download, TrendingUp, Package, AlertTriangle, Clock, Wallet } from 'lucide-react'
+import { FileText, Download, TrendingUp, Package, AlertTriangle, Wallet, DollarSign } from 'lucide-react'
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { useRole, canExport } from '@/lib/use-role'
 import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
@@ -99,6 +99,20 @@ export default function ReportsPage() {
   const totalInventoryValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
   const totalPotentialProfit = products.reduce((s, p) => s + p.stock_quantity * (p.selling_price - p.unit_cost), 0)
 
+  const { actualRevenue, actualProfit, unitsSold } = useMemo(() => {
+    const productsById = new Map(products.map(p => [p.id, p]))
+    let revenue = 0, profit = 0, units = 0
+    for (const tx of transactions) {
+      if (tx.type !== 'outbound') continue
+      const p = productsById.get(tx.product_id)
+      if (!p) continue
+      revenue += tx.quantity * p.selling_price
+      profit += tx.quantity * (p.selling_price - p.unit_cost)
+      units += tx.quantity
+    }
+    return { actualRevenue: revenue, actualProfit: profit, unitsSold: units }
+  }, [transactions, products])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -131,14 +145,15 @@ export default function ReportsPage() {
       </div>
 
       {/* Summary KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
         {[
-          { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), icon: TrendingUp, color: '#2FA6B8', bg: '#E0F7FA' },
-          { label: 'Potential Profit', value: formatCurrency(totalPotentialProfit), icon: Wallet, color: '#EC4899', bg: '#FCE7F3' },
-          { label: 'Products In Stock', value: stockStatus[0].value, icon: Package, color: '#22C55E', bg: '#DCFCE7' },
-          { label: 'Low / Out of Stock', value: stockStatus[1].value + stockStatus[2].value, icon: AlertTriangle, color: '#F59E0B', bg: '#FEF3C7' },
-          { label: 'Total Transactions', value: transactions.length, icon: Clock, color: '#6366F1', bg: '#EDE9FE' },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
+          { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), sub: 'Cost of stock on hand', icon: TrendingUp, color: '#2FA6B8', bg: '#E0F7FA' },
+          { label: 'Potential Profit', value: formatCurrency(totalPotentialProfit), sub: 'If all stock on hand sells', icon: Wallet, color: '#EC4899', bg: '#FCE7F3' },
+          { label: 'Actual Revenue (Sold)', value: formatCurrency(actualRevenue), sub: `${unitsSold.toLocaleString()} units sold`, icon: DollarSign, color: '#0EA5E9', bg: '#E0F2FE' },
+          { label: 'Actual Profit (Sold)', value: formatCurrency(actualProfit), sub: 'From completed sales', icon: Wallet, color: '#16A34A', bg: '#DCFCE7' },
+          { label: 'Products In Stock', value: stockStatus[0].value, sub: 'In stock, no shortage', icon: Package, color: '#22C55E', bg: '#DCFCE7' },
+          { label: 'Low / Out of Stock', value: stockStatus[1].value + stockStatus[2].value, sub: 'Products need attention', icon: AlertTriangle, color: '#F59E0B', bg: '#FEF3C7' },
+        ].map(({ label, value, sub, icon: Icon, color, bg }) => (
           <div key={label} className="card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <div style={{ width: 38, height: 38, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -147,6 +162,7 @@ export default function ReportsPage() {
             </div>
             <div style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em' }}>{value}</div>
             <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500, marginTop: 4 }}>{label}</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{sub}</div>
           </div>
         ))}
       </div>

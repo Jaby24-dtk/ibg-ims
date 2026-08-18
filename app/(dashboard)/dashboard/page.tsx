@@ -25,21 +25,27 @@ export default function DashboardPage() {
   const router = useRouter()
   const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
   const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions.slice(0, 6))
+  const [outboundTx, setOutboundTx] = useState<Pick<Transaction, 'product_id' | 'quantity'>[]>(
+    supabaseConfigured ? [] : mockTransactions.filter(t => t.type === 'outbound')
+  )
 
   useEffect(() => {
     if (!supabaseConfigured) return
     let cancelled = false
     ;(async () => {
       const sb = createClient()
-      const [productsRes, txRes] = await Promise.all([
+      const [productsRes, txRes, outboundRes] = await Promise.all([
         sb.from('products').select('*'),
         sb.from('transactions').select('*').order('created_at', { ascending: false }).limit(6),
+        sb.from('transactions').select('product_id, quantity').eq('type', 'outbound'),
       ])
       if (cancelled) return
       if (productsRes.error) console.error('Failed to load products:', productsRes.error)
       else setProducts((productsRes.data ?? []) as Product[])
       if (txRes.error) console.error('Failed to load transactions:', txRes.error)
       else setTransactions((txRes.data ?? []) as Transaction[])
+      if (outboundRes.error) console.error('Failed to load sales:', outboundRes.error)
+      else setOutboundTx((outboundRes.data ?? []) as Pick<Transaction, 'product_id' | 'quantity'>[])
     })()
     return () => { cancelled = true }
   }, [])
@@ -53,8 +59,13 @@ export default function DashboardPage() {
     }).length
     const totalValue = products.reduce((s, p) => s + p.stock_quantity * p.unit_cost, 0)
     const totalPotentialProfit = products.reduce((s, p) => s + p.stock_quantity * (p.selling_price - p.unit_cost), 0)
-    return { totalSKUs, totalUnits, lowOrOut, totalValue, totalPotentialProfit }
-  }, [products])
+    const productsById = new Map(products.map(p => [p.id, p]))
+    const totalActualProfit = outboundTx.reduce((s, tx) => {
+      const p = productsById.get(tx.product_id)
+      return p ? s + tx.quantity * (p.selling_price - p.unit_cost) : s
+    }, 0)
+    return { totalSKUs, totalUnits, lowOrOut, totalValue, totalPotentialProfit, totalActualProfit }
+  }, [products, outboundTx])
 
   const categoryData = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -123,7 +134,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
         {[
           {
             icon: Package, label: 'Total SKUs', value: kpis.totalSKUs,
@@ -144,6 +155,10 @@ export default function DashboardPage() {
           {
             icon: Wallet, label: 'Potential Profit', value: formatCurrency(kpis.totalPotentialProfit),
             sub: 'Selling − buying price, on hand', color: '#EC4899', bg: '#FCE7F3', trend: `${formatCurrency(kpis.totalPotentialProfit)} if all sold`,
+          },
+          {
+            icon: Wallet, label: 'Actual Profit', value: formatCurrency(kpis.totalActualProfit),
+            sub: 'From completed sales', color: '#16A34A', bg: '#DCFCE7', trend: `${formatCurrency(kpis.totalActualProfit)} realized`,
           },
         ].map(({ icon: Icon, label, value, sub, color, bg, trend }) => (
           <div key={label} className="kpi-card" style={{ position: 'relative', overflow: 'hidden' }}>
