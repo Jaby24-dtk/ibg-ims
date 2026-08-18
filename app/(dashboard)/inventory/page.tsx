@@ -10,6 +10,13 @@ import { getStockStatus, getExpiryStatus, type Product } from '@/types'
 import { formatCurrency, formatDate, daysUntil, generateId } from '@/lib/utils'
 import CameraScanner from '@/components/inventory/CameraScanner'
 import { useRole, canEdit, canExport } from '@/lib/use-role'
+import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/context/AuthContext'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 type ScannedItem = {
   id: string
@@ -23,6 +30,7 @@ type ScannedItem = {
 
 export default function InventoryPage() {
   const role = useRole()
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -38,12 +46,31 @@ export default function InventoryPage() {
   const [barcodeInput, setBarcodeInput] = useState('')
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([])
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error' | null; msg: string }>({ type: null, msg: '' })
-  const [products, setProducts] = useState(mockProducts)
+  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [loadingProducts, setLoadingProducts] = useState(supabaseConfigured)
+  const [addError, setAddError] = useState('')
   const [showCsvModal, setShowCsvModal] = useState(false)
   const [csvRows, setCsvRows] = useState<Partial<Product>[]>([])
   const [csvErrors, setCsvErrors] = useState<string[]>([])
   const scanInputRef = useRef<HTMLInputElement>(null)
   const csvFileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const { data, error } = await sb.from('products').select('*').order('created_at', { ascending: false })
+      if (cancelled) return
+      if (error) {
+        console.error('Failed to load products from Supabase:', error)
+      } else {
+        setProducts((data ?? []) as Product[])
+      }
+      setLoadingProducts(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const filteredProducts = products.filter(p => {
     const q = search.toLowerCase()
@@ -88,6 +115,54 @@ export default function InventoryPage() {
 
     setTimeout(() => setScanFeedback({ type: null, msg: '' }), 3000)
   }, [products])
+
+  const saveScannedTransactions = useCallback(async () => {
+    const successItems = scannedItems.filter(i => i.found)
+    if (!successItems.length) return
+
+    const newQty = new Map<string, number>()
+    for (const p of products) {
+      const items = successItems.filter(i => i.product!.id === p.id)
+      if (!items.length) continue
+      let qty = p.stock_quantity
+      for (const i of items) {
+        if (i.action === 'receive') qty += i.quantity
+        else if (i.action === 'outbound') qty = Math.max(0, qty - i.quantity)
+        else qty = i.quantity
+      }
+      newQty.set(p.id, qty)
+    }
+
+    if (supabaseConfigured) {
+      const sb = createClient()
+      try {
+        for (const [productId, qty] of newQty) {
+          const { error } = await sb.from('products').update({ stock_quantity: qty }).eq('id', productId)
+          if (error) throw error
+        }
+        const txRows = successItems.map(i => ({
+          product_id: i.product!.id,
+          sku: i.product!.sku,
+          barcode: i.barcode,
+          type: i.action === 'receive' ? 'inbound' : i.action === 'outbound' ? 'outbound' : 'adjustment',
+          quantity: i.quantity,
+          user_id: user?.id ?? null,
+          notes: 'Scanned via IMS barcode scanner',
+        }))
+        const { error: txError } = await sb.from('transactions').insert(txRows)
+        if (txError) throw txError
+      } catch (err) {
+        setScanFeedback({ type: 'error', msg: err instanceof Error ? err.message : 'Failed to save transactions' })
+        setTimeout(() => setScanFeedback({ type: null, msg: '' }), 4000)
+        return
+      }
+    }
+
+    setProducts(prev => prev.map(p => newQty.has(p.id) ? { ...p, stock_quantity: newQty.get(p.id)! } : p))
+    setScannedItems([])
+    setScanFeedback({ type: 'success', msg: 'Transactions saved!' })
+    setTimeout(() => setScanFeedback({ type: null, msg: '' }), 3000)
+  }, [scannedItems, products, user])
 
   const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -348,22 +423,7 @@ export default function InventoryPage() {
                   <button
                     className="btn-primary btn-sm"
                     style={{ width: '100%', justifyContent: 'center', marginTop: 10 }}
-                    onClick={() => {
-                      setProducts(prev => prev.map(p => {
-                        const items = scannedItems.filter(i => i.found && i.product!.id === p.id)
-                        if (!items.length) return p
-                        let qty = p.stock_quantity
-                        for (const i of items) {
-                          if (i.action === 'receive') qty += i.quantity
-                          else if (i.action === 'outbound') qty = Math.max(0, qty - i.quantity)
-                          else qty = i.quantity
-                        }
-                        return { ...p, stock_quantity: qty }
-                      }))
-                      setScannedItems([])
-                      setScanFeedback({ type: 'success', msg: 'Transactions saved!' })
-                      setTimeout(() => setScanFeedback({ type: null, msg: '' }), 3000)
-                    }}
+                    onClick={saveScannedTransactions}
                   >
                     Save Transactions
                   </button>
@@ -507,7 +567,14 @@ export default function InventoryPage() {
                   </td>
                 </tr>
               ))}
-              {filteredProducts.length === 0 && (
+              {loadingProducts && filteredProducts.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
+                    <div style={{ fontSize: 14 }}>Loading products…</div>
+                  </td>
+                </tr>
+              )}
+              {!loadingProducts && filteredProducts.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
                     <Package size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
@@ -661,32 +728,51 @@ export default function InventoryPage() {
                   onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))}
                 />
               </div>
+              {addError && (
+                <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B' }}>
+                  {addError}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid #F1F5F9' }}>
                 <button className="btn-secondary btn-sm" onClick={() => setShowAddModal(false)}>Cancel</button>
                 <button
                   className="btn-primary btn-sm"
-                  onClick={() => {
+                  onClick={async () => {
                     if (!addForm.name.trim() || !addForm.sku.trim()) return
-                    const newProduct: Product = {
-                      id: generateId(),
+                    setAddError('')
+                    const payload = {
                       name: addForm.name.trim(),
                       sku: addForm.sku.trim(),
-                      barcode: addForm.barcode.trim(),
+                      barcode: addForm.barcode.trim() || null,
                       brand: addForm.brand.trim(),
                       category: addForm.category.trim() || 'General',
                       description: addForm.description.trim(),
                       batch_number: addForm.batch_number.trim(),
-                      expiry_date: addForm.expiry_date,
+                      expiry_date: addForm.expiry_date || null,
                       unit_cost: parseFloat(addForm.unit_cost) || 0,
                       selling_price: parseFloat(addForm.selling_price) || 0,
                       reorder_level: parseInt(addForm.reorder_level) || 0,
                       stock_quantity: parseInt(addForm.stock_quantity) || 0,
-                      supplier_id: '',
-                      image_url: '',
-                      created_at: new Date().toISOString(),
-                      updated_at: new Date().toISOString(),
                     }
-                    setProducts(prev => [newProduct, ...prev])
+
+                    if (supabaseConfigured) {
+                      const sb = createClient()
+                      const { data, error } = await sb.from('products').insert(payload).select().single()
+                      if (error) { setAddError(error.message); return }
+                      setProducts(prev => [data as Product, ...prev])
+                    } else {
+                      const newProduct: Product = {
+                        ...payload,
+                        id: generateId(),
+                        barcode: payload.barcode ?? '',
+                        expiry_date: payload.expiry_date ?? '',
+                        supplier_id: '',
+                        image_url: '',
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      }
+                      setProducts(prev => [newProduct, ...prev])
+                    }
                     setAddForm({ name: '', sku: '', barcode: '', brand: '', batch_number: '', expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '', stock_quantity: '', category: 'General', description: '' })
                     setShowAddModal(false)
                   }}
@@ -776,8 +862,22 @@ export default function InventoryPage() {
                 <button className="btn-secondary btn-sm" onClick={() => setShowCsvModal(false)}>Cancel</button>
                 <button
                   className="btn-primary btn-sm"
-                  onClick={() => {
-                    setProducts(prev => [...prev, ...(csvRows as Product[])])
+                  onClick={async () => {
+                    if (supabaseConfigured) {
+                      const sb = createClient()
+                      const payload = csvRows.map(r => ({
+                        name: r.name, sku: r.sku, barcode: r.barcode || null, brand: r.brand,
+                        category: r.category, description: r.description, batch_number: r.batch_number,
+                        expiry_date: r.expiry_date || null, unit_cost: r.unit_cost,
+                        selling_price: r.selling_price, reorder_level: r.reorder_level,
+                        stock_quantity: r.stock_quantity,
+                      }))
+                      const { data, error } = await sb.from('products').insert(payload).select()
+                      if (error) { setCsvErrors(prev => [...prev, `Import failed: ${error.message}`]); return }
+                      setProducts(prev => [...(data as Product[]), ...prev])
+                    } else {
+                      setProducts(prev => [...(csvRows as Product[]), ...prev])
+                    }
                     setShowCsvModal(false)
                     setCsvRows([])
                     setCsvErrors([])
