@@ -1,10 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Bell, AlertTriangle, Package, Clock, ShoppingCart, SlidersHorizontal, CheckCircle, X } from 'lucide-react'
 import { mockAlerts } from '@/lib/mock-data'
 import { formatDateTime } from '@/lib/utils'
 import type { Alert, AlertType } from '@/types'
+import { createClient } from '@/lib/supabase/client'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 const alertConfig: Record<AlertType, { label: string; icon: React.ElementType; badge: string; color: string }> = {
   low_stock:               { label: 'Low Stock',               icon: AlertTriangle, badge: 'badge-warning', color: '#F59E0B' },
@@ -15,9 +21,22 @@ const alertConfig: Record<AlertType, { label: string; icon: React.ElementType; b
 }
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<Alert[]>(mockAlerts)
+  const [alerts, setAlerts] = useState<Alert[]>(supabaseConfigured ? [] : mockAlerts)
   const [typeFilter, setTypeFilter] = useState<'All' | AlertType>('All')
   const [statusFilter, setStatusFilter] = useState<'All' | 'unread' | 'read'>('All')
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const { data, error } = await sb.from('alerts').select('*').order('created_at', { ascending: false })
+      if (cancelled) return
+      if (error) console.error('Failed to load alerts from Supabase:', error)
+      else setAlerts((data ?? []) as Alert[])
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const filtered = alerts.filter(a => {
     const matchType = typeFilter === 'All' || a.type === typeFilter
@@ -27,8 +46,24 @@ export default function AlertsPage() {
 
   const unreadCount = alerts.filter(a => a.status === 'unread').length
 
-  const markRead = (id: string) => setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'read' as const } : a))
-  const markAllRead = () => setAlerts(prev => prev.map(a => ({ ...a, status: 'read' as const })))
+  const markRead = async (id: string) => {
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { error } = await sb.from('alerts').update({ status: 'read' }).eq('id', id)
+      if (error) { console.error('Failed to mark alert read:', error); return }
+    }
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'read' as const } : a))
+  }
+
+  const markAllRead = async () => {
+    const unreadIds = alerts.filter(a => a.status === 'unread').map(a => a.id)
+    if (supabaseConfigured && unreadIds.length) {
+      const sb = createClient()
+      const { error } = await sb.from('alerts').update({ status: 'read' }).in('id', unreadIds)
+      if (error) { console.error('Failed to mark all alerts read:', error); return }
+    }
+    setAlerts(prev => prev.map(a => ({ ...a, status: 'read' as const })))
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

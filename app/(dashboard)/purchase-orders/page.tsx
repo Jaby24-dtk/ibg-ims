@@ -1,11 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ShoppingCart, Plus, X, Check, Eye, Edit2, Package, FileText } from 'lucide-react'
 import { mockPurchaseOrders, mockSuppliers } from '@/lib/mock-data'
 import { formatCurrency, formatDate, generateOrderNumber, generateId } from '@/lib/utils'
-import type { PurchaseOrder, PurchaseOrderStatus } from '@/types'
+import type { PurchaseOrder, PurchaseOrderStatus, Supplier } from '@/types'
 import { useRole, canEdit, canExport } from '@/lib/use-role'
+import { createClient } from '@/lib/supabase/client'
+
+const supabaseConfigured = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return url.length > 0 && !url.includes('your-project-ref')
+})()
 
 const statusConfig: Record<PurchaseOrderStatus, { label: string; badge: string }> = {
   draft:      { label: 'Draft',      badge: 'badge-gray' },
@@ -17,11 +23,34 @@ const statusConfig: Record<PurchaseOrderStatus, { label: string; badge: string }
 
 export default function PurchaseOrdersPage() {
   const role = useRole()
-  const [orders, setOrders] = useState<PurchaseOrder[]>(mockPurchaseOrders)
+  const [orders, setOrders] = useState<PurchaseOrder[]>(supabaseConfigured ? [] : mockPurchaseOrders)
+  const [suppliers, setSuppliers] = useState<Supplier[]>(supabaseConfigured ? [] : mockSuppliers)
   const [showModal, setShowModal] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null)
   const [selectedSupplier, setSelectedSupplier] = useState(mockSuppliers[0]?.id ?? '')
   const [orderNotes, setOrderNotes] = useState('')
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    let cancelled = false
+    ;(async () => {
+      const sb = createClient()
+      const [ordersRes, suppliersRes] = await Promise.all([
+        sb.from('purchase_orders').select('*').order('created_at', { ascending: false }),
+        sb.from('suppliers').select('*').order('name'),
+      ])
+      if (cancelled) return
+      if (ordersRes.error) console.error('Failed to load purchase orders:', ordersRes.error)
+      else setOrders((ordersRes.data ?? []) as PurchaseOrder[])
+      if (suppliersRes.error) console.error('Failed to load suppliers:', suppliersRes.error)
+      else {
+        const list = (suppliersRes.data ?? []) as Supplier[]
+        setSuppliers(list)
+        setSelectedSupplier(list[0]?.id ?? '')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const summary = {
     total: orders.length,
@@ -32,8 +61,14 @@ export default function PurchaseOrdersPage() {
     cancelled: orders.filter(o => o.status === 'cancelled').length,
   }
 
-  const updateStatus = (id: string, status: PurchaseOrderStatus) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status, updated_at: new Date().toISOString() } : o))
+  const updateStatus = async (id: string, status: PurchaseOrderStatus) => {
+    const updated_at = new Date().toISOString()
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { error } = await sb.from('purchase_orders').update({ status, updated_at }).eq('id', id)
+      if (error) { console.error('Failed to update purchase order status:', error); return }
+    }
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status, updated_at } : o))
     setSelectedOrder(null)
   }
 
@@ -83,7 +118,7 @@ export default function PurchaseOrdersPage() {
             </thead>
             <tbody>
               {orders.map((order, i) => {
-                const supplier = mockSuppliers.find(s => s.id === order.supplier_id)
+                const supplier = suppliers.find(s => s.id === order.supplier_id)
                 const cfg = statusConfig[order.status]
                 return (
                   <tr key={order.id} className="table-row-hover" style={{ borderBottom: i < orders.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
@@ -167,8 +202,8 @@ export default function PurchaseOrdersPage() {
             </div>
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[
-                { label: 'Supplier', value: mockSuppliers.find(s => s.id === selectedOrder.supplier_id)?.name ?? '—' },
-                { label: 'Contact', value: mockSuppliers.find(s => s.id === selectedOrder.supplier_id)?.contact_person ?? '—' },
+                { label: 'Supplier', value: suppliers.find(s => s.id === selectedOrder.supplier_id)?.name ?? '—' },
+                { label: 'Contact', value: suppliers.find(s => s.id === selectedOrder.supplier_id)?.contact_person ?? '—' },
                 { label: 'Total Cost', value: formatCurrency(selectedOrder.total_cost) },
                 { label: 'Created', value: formatDate(selectedOrder.created_at) },
                 { label: 'Last Updated', value: formatDate(selectedOrder.updated_at) },
@@ -218,7 +253,7 @@ export default function PurchaseOrdersPage() {
                   value={selectedSupplier}
                   onChange={e => setSelectedSupplier(e.target.value)}
                 >
-                  {mockSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
               <div>
@@ -236,15 +271,33 @@ export default function PurchaseOrdersPage() {
                 <button className="btn-secondary btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
                 <button
                   className="btn-primary btn-sm"
-                  onClick={() => {
-                    const newOrder: PurchaseOrder = {
-                      id: generateId(), order_number: generateOrderNumber(),
-                      supplier_id: selectedSupplier, status: 'draft', total_cost: 0,
-                      notes: orderNotes.trim() || undefined, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+                  onClick={async () => {
+                    const payload = {
+                      order_number: generateOrderNumber(),
+                      supplier_id: selectedSupplier || null,
+                      status: 'draft' as const,
+                      total_cost: 0,
+                      notes: orderNotes.trim() || null,
                     }
-                    setOrders(prev => [newOrder, ...prev])
+
+                    if (supabaseConfigured) {
+                      const sb = createClient()
+                      const { data, error } = await sb.from('purchase_orders').insert(payload).select().single()
+                      if (error) { console.error('Failed to create purchase order:', error); return }
+                      setOrders(prev => [data as PurchaseOrder, ...prev])
+                    } else {
+                      const newOrder: PurchaseOrder = {
+                        ...payload,
+                        id: generateId(),
+                        supplier_id: payload.supplier_id ?? '',
+                        notes: payload.notes ?? undefined,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      }
+                      setOrders(prev => [newOrder, ...prev])
+                    }
                     setOrderNotes('')
-                    setSelectedSupplier(mockSuppliers[0]?.id ?? '')
+                    setSelectedSupplier(suppliers[0]?.id ?? '')
                     setShowModal(false)
                   }}
                 >
