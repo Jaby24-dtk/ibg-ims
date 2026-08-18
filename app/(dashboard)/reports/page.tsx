@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts'
 import { FileText, Download, TrendingUp, Package, AlertTriangle, Wallet, DollarSign } from 'lucide-react'
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
@@ -195,7 +195,6 @@ export default function ReportsPage() {
                   {stockStatus.filter(d => d.value > 0).map(entry => <Cell key={entry.name} fill={STATUS_COLORS[entry.name]} />)}
                 </Pie>
                 <Tooltip />
-                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </div>
