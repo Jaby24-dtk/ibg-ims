@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Plus, Upload, Download, Scan, Search, X, Package,
-  Eye, Edit2, AlertTriangle, CheckCircle, Camera, Gift,
+  Eye, Edit2, AlertTriangle, CheckCircle, Camera, Gift, Trash2,
 } from 'lucide-react'
 import { mockProducts, mockSuppliers } from '@/lib/mock-data'
 import { getStockStatus, getExpiryStatus, type Product } from '@/types'
@@ -50,6 +50,8 @@ export default function InventoryPage() {
     stock_quantity: '', category: 'General', description: '',
   })
   const [editError, setEditError] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [scanMode, setScanMode] = useState(false)
   const [showCamera, setShowCamera] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -234,6 +236,34 @@ export default function InventoryPage() {
 
     setProducts(prev => prev.map(p => p.id === updated.id ? updated : p))
     setEditingProduct(null)
+  }
+
+  const deleteProduct = async (p: Product) => {
+    if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return
+    setDeleteError('')
+    setDeletingId(p.id)
+
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { error } = await sb.from('products').delete().eq('id', p.id)
+      if (error) {
+        // Postgres 23503 = foreign key violation. products has no ON DELETE
+        // rule on transactions/alerts/purchase_order_items.product_id, so any
+        // product with real history (a scan, a sale, an alert, a PO line)
+        // can't be deleted outright — show why instead of the raw DB error.
+        setDeleteError(
+          error.code === '23503'
+            ? 'This product has transaction, alert, or purchase order history and can\'t be deleted. Set its stock to 0 instead.'
+            : error.message
+        )
+        setDeletingId(null)
+        return
+      }
+    }
+
+    setProducts(prev => prev.filter(x => x.id !== p.id))
+    setDeletingId(null)
+    setShowDetailModal(null)
   }
 
   const markAsSample = async (p: Product) => {
@@ -637,7 +667,7 @@ export default function InventoryPage() {
                   <td style={{ padding: '14px 16px' }}>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
-                        onClick={() => setShowDetailModal(p)}
+                        onClick={() => { setShowDetailModal(p); setDeleteError('') }}
                         style={{
                           width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0',
                           background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -788,8 +818,21 @@ export default function InventoryPage() {
                   )}
                 </div>
               )}
+              {deleteError && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#991B1B' }}>{deleteError}</div>
+              )}
               <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button className="btn-secondary btn-sm" onClick={() => { setShowDetailModal(null); setSampleError(''); setSampleQty('1') }}>Close</button>
+                {canEdit(role) && (
+                  <button
+                    className="btn-secondary btn-sm"
+                    style={{ marginRight: 'auto', color: '#DC2626', borderColor: '#FECACA' }}
+                    disabled={deletingId === showDetailModal.id}
+                    onClick={() => deleteProduct(showDetailModal)}
+                  >
+                    <Trash2 size={14} /> {deletingId === showDetailModal.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+                <button className="btn-secondary btn-sm" onClick={() => { setShowDetailModal(null); setSampleError(''); setSampleQty('1'); setDeleteError('') }}>Close</button>
                 {canEdit(role) && (
                   <button
                     className="btn-primary btn-sm"
