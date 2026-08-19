@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { AUTH_COOKIE_OPTIONS } from './lib/supabase/config'
 
 function base64UrlDecode(str: string): string {
   const base64 = str.replace(/-/g, '+').replace(/_/g, '/')
@@ -32,9 +33,16 @@ function base64UrlDecode(str: string): string {
 // own embedded timestamp, done. No network call means no rate limit exposure
 // and no dependency on Supabase's Auth API being healthy just to view a page.
 function isSessionValid(request: NextRequest): boolean {
+  // Match the exact configured cookie name (plus chunk suffixes) only — not
+  // a generic sb-*-auth-token pattern. A generic pattern would also catch
+  // the old sb-<ref>-auth-token cookie name from before the 2026-08-19
+  // rename (see AUTH_COOKIE_OPTIONS.name comment) and concatenate its value
+  // together with the real one, corrupting the parse.
+  const baseName = AUTH_COOKIE_OPTIONS.name
+  const nameRegex = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\.\\d+)?$`)
   const authCookies = request.cookies
     .getAll()
-    .filter(c => /^sb-.*-auth-token(\.\d+)?$/.test(c.name))
+    .filter(c => nameRegex.test(c.name))
     .sort((a, b) => {
       const an = a.name.match(/\.(\d+)$/)
       const bn = b.name.match(/\.(\d+)$/)

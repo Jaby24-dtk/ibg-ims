@@ -20,7 +20,22 @@ export function isSupabaseConfigured(): boolean {
 // fully sufficient for direct sign-in — which is the primary, must-work use
 // case. This trades away the STIV iframe embed working until that's
 // revisited separately; direct login reliability takes priority.
+// Explicit `name` (2026-08-19): live browser inspection (Chrome's cookieStore
+// API, which exposes attributes document.cookie hides) found that browsers
+// which had a session from before the SameSite=None -> Lax change above keep
+// BOTH cookies alive under the default name — Chrome was observed storing
+// SameSite=None and SameSite=Lax cookies of the identical name/domain/path as
+// two separate entries, contrary to the RFC 6265 (name, domain, path)
+// identity. The None-scoped one (a dead session) is read first and
+// permanently shadows every fresh sign-in. It turned out to be undeletable
+// from every angle tried live: document.cookie, cookieStore.delete(),
+// cookieStore.set() with a past expiry, and even a verified-correct HTTP
+// Set-Cookie response header — none of them could remove it, including
+// across a full page reload. Rather than keep fighting whatever's pinning
+// it, give the cookie a new name so it has no legacy entry to collide with
+// at all. Must still match middleware.ts's `sb-.*-auth-token` matcher.
 export const AUTH_COOKIE_OPTIONS = {
+  name: 'sb-ims-auth-token',
   sameSite: 'lax' as const,
   secure: true,
 }
