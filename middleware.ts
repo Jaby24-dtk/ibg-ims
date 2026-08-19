@@ -58,6 +58,33 @@ function isSessionValid(request: NextRequest): boolean {
   }
 }
 
+// One-time cleanup for sessions established before 2026-08-19 (when the
+// cookie's SameSite attribute changed from 'none' to 'lax'). Verified live
+// in a real browser: Chrome stores a SameSite=None cookie and a SameSite=Lax
+// cookie of the *identical* name/domain/path as two genuinely separate
+// entries — not the RFC 6265 (name, domain, path) identity the spec
+// describes. A plain client-side overwrite with the new SameSite only ever
+// touches the Lax slot, so the old None-scoped cookie (holding a dead
+// session from before this change) keeps coexisting and — because it's
+// evidently read first — permanently shadows every fresh sign-in from then
+// on. document.cookie deletion, cookieStore.delete(), and cookieStore.set()
+// with a past expiry from the client were all tried live and NONE of them
+// could remove the None-scoped slot, even across a full reload. An actual
+// HTTP Set-Cookie response header (the canonical deletion mechanism) is the
+// one lever left untried, so middleware sends it here on every response,
+// targeting only the SameSite=None variant of the cookie name — the current
+// SameSite=Lax session cookie isn't touched.
+function clearLegacySameSiteNoneCookie(response: NextResponse, supabaseUrl: string) {
+  try {
+    const ref = new URL(supabaseUrl).hostname.split('.')[0]
+    response.cookies.set(`sb-${ref}-auth-token`, '', {
+      path: '/', maxAge: 0, sameSite: 'none', secure: true,
+    })
+  } catch {
+    // malformed supabaseUrl — nothing to clear
+  }
+}
+
 export function middleware(request: NextRequest) {
   const csp = [
     "default-src 'self'",
@@ -77,6 +104,8 @@ export function middleware(request: NextRequest) {
   const configured = supabaseUrl.length > 0 && !supabaseUrl.includes('your-project-ref')
   if (!configured) return response
 
+  clearLegacySameSiteNoneCookie(response, supabaseUrl)
+
   const authed = isSessionValid(request)
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
@@ -89,13 +118,17 @@ export function middleware(request: NextRequest) {
   if (!authed && !isLoginPage && !isRoot && !isSsoBridge) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    return NextResponse.redirect(url)
+    const redirectRes = NextResponse.redirect(url)
+    clearLegacySameSiteNoneCookie(redirectRes, supabaseUrl)
+    return redirectRes
   }
 
   if (authed && isLoginPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
+    const redirectRes = NextResponse.redirect(url)
+    clearLegacySameSiteNoneCookie(redirectRes, supabaseUrl)
+    return redirectRes
   }
 
   return response
