@@ -242,7 +242,7 @@ export default function DashboardPage() {
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Low Stock Alerts</h3>
-            <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/alerts')}>View all →</span>
+            <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/inventory?sort=stock')}>View all →</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {lowStockProducts.map(p => {
@@ -311,7 +311,7 @@ export default function DashboardPage() {
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Expiring Soon</h3>
-            <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/alerts')}>View all →</span>
+            <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/inventory?sort=expiry')}>View all →</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {expiringProducts.map(p => (

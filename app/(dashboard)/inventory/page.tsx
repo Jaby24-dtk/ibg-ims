@@ -31,6 +31,19 @@ type ScannedItem = {
 export default function InventoryPage() {
   const role = useRole()
   const { user } = useAuth()
+  // Deep-link support for Dashboard's "Low Stock Alerts" / "Expiring Soon"
+  // View all links — those are computed live from real product data, but
+  // used to send here (?sort is now their target) via /alerts, a page that
+  // reads from the separate `alerts` DB table nothing in the app has ever
+  // written rows into, so it always showed "0 alerts" regardless of what
+  // Dashboard found. Sorting the real list here is what actually surfaces
+  // the products those cards were pointing at. Read via window.location
+  // (not next/navigation's useSearchParams) so this page can stay statically
+  // prerendered instead of needing a Suspense boundary.
+  const [sortBy, setSortBy] = useState<string | null>(null)
+  useEffect(() => {
+    setSortBy(new URLSearchParams(window.location.search).get('sort'))
+  }, [])
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -90,6 +103,16 @@ export default function InventoryPage() {
     const matchStatus = statusFilter === 'All' || getStockStatus(p) === statusFilter
     return matchSearch && matchCategory && matchStatus
   })
+  if (sortBy === 'stock') {
+    filteredProducts.sort((a, b) => a.stock_quantity - b.stock_quantity)
+  } else if (sortBy === 'expiry') {
+    // No expiry date at all sorts last — it's not "expiring," it's unset.
+    filteredProducts.sort((a, b) => {
+      const da = a.expiry_date ? daysUntil(a.expiry_date) : Infinity
+      const db = b.expiry_date ? daysUntil(b.expiry_date) : Infinity
+      return da - db
+    })
+  }
 
   const handleBarcodeScan = useCallback((rawInput: string) => {
     const code = rawInput.trim()
