@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Bell, AlertTriangle, Package, Clock, ShoppingCart, SlidersHorizontal, CheckCircle, X } from 'lucide-react'
+import { Bell, AlertTriangle, Package, Clock, ShoppingCart, SlidersHorizontal, CheckCircle, X, Trash2 } from 'lucide-react'
 import { mockAlerts } from '@/lib/mock-data'
 import { formatDateTime } from '@/lib/utils'
 import type { Alert, AlertType } from '@/types'
@@ -74,6 +74,16 @@ export default function AlertsPage() {
       if (error) { console.error('Failed to mark all alerts read:', error); return }
     }
     setAlerts(prev => prev.map(a => ({ ...a, status: 'read' as const })))
+  }
+
+  const deleteAlert = async (id: string) => {
+    if (!confirm('Delete this alert? This cannot be undone.')) return
+    if (supabaseConfigured) {
+      const sb = createClient()
+      const { error } = await sb.from('alerts').delete().eq('id', id)
+      if (error) { console.error('Failed to delete alert:', error); return }
+    }
+    setAlerts(prev => prev.filter(a => a.id !== id))
   }
 
   return (
@@ -189,21 +199,37 @@ export default function AlertsPage() {
                   {formatDateTime(alert.created_at)}
                 </div>
               </div>
-              {isUnread && (
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                {isUnread && (
+                  <button
+                    onClick={() => markRead(alert.id)}
+                    style={{
+                      background: 'none', border: '1px solid #E2E8F0',
+                      borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                      color: '#64748B', cursor: 'pointer', transition: 'all 0.15s',
+                      fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center', gap: 5,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+                  >
+                    <CheckCircle size={13} /> Mark Read
+                  </button>
+                )}
                 <button
-                  onClick={() => markRead(alert.id)}
+                  onClick={() => deleteAlert(alert.id)}
+                  title="Delete"
                   style={{
-                    flexShrink: 0, background: 'none', border: '1px solid #E2E8F0',
-                    borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600,
-                    color: '#64748B', cursor: 'pointer', transition: 'all 0.15s',
-                    fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center', gap: 5,
+                    background: 'none', border: '1px solid #FECACA',
+                    borderRadius: 8, padding: '6px 8px', fontSize: 12, fontWeight: 600,
+                    color: '#DC2626', cursor: 'pointer', transition: 'all 0.15s',
+                    fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#FEE2E2' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
                 >
-                  <CheckCircle size={13} /> Mark Read
+                  <Trash2 size={13} />
                 </button>
-              )}
+              </div>
             </div>
           )
         })}

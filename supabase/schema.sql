@@ -143,3 +143,10 @@ create policy "Authenticated update alerts" on public.alerts for update using (a
 -- policies above — alerts are system-generated notifications a Dashboard
 -- visit triggers for any signed-in user, not user-authored data.
 create policy "Authenticated insert alerts" on public.alerts for insert with check (auth.role() = 'authenticated');
+-- No delete policy either, discovered the same way as the missing insert
+-- policy above — a REST delete against the table returned 200 with an empty
+-- body (0 rows actually removed) despite matching a real row, since RLS
+-- silently filters out rows the policy set doesn't grant delete on rather
+-- than erroring. Needed once a delete-alert action was added to the Alerts
+-- page (2026-08-19) — same scope as the other alerts policies.
+create policy "Authenticated delete alerts" on public.alerts for delete using (auth.role() = 'authenticated');
