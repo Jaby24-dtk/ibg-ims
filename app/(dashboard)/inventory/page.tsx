@@ -188,7 +188,11 @@ export default function InventoryPage() {
   }
 
   const saveEditedProduct = async () => {
-    if (!editingProduct || !editForm.name.trim() || !editForm.sku.trim()) return
+    if (!editingProduct) return
+    if (!editForm.name.trim() || !editForm.sku.trim()) {
+      setEditError('Product Name and SKU are required.')
+      return
+    }
     setEditError('')
     const payload = {
       name: editForm.name.trim(),
@@ -806,19 +810,21 @@ export default function InventoryPage() {
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 {([
-                  { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text' },
-                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text' },
-                  { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text' },
-                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text' },
-                  { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text' },
-                  { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date' },
-                  { label: 'Unit Cost', key: 'unit_cost', placeholder: '0.00', type: 'number' },
-                  { label: 'Selling Price', key: 'selling_price', placeholder: '0.00', type: 'number' },
-                  { label: 'Reorder Level', key: 'reorder_level', placeholder: '0', type: 'number' },
-                  { label: 'Current Stock', key: 'stock_quantity', placeholder: '0', type: 'number' },
-                ] as const).map(({ label, key, placeholder, type }) => (
+                  { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text', required: true },
+                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text', required: true },
+                  { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text', required: false },
+                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text', required: false },
+                  { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text', required: false },
+                  { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date', required: false },
+                  { label: 'Unit Cost', key: 'unit_cost', placeholder: '0.00', type: 'number', required: false },
+                  { label: 'Selling Price', key: 'selling_price', placeholder: '0.00', type: 'number', required: false },
+                  { label: 'Reorder Level', key: 'reorder_level', placeholder: '0', type: 'number', required: false },
+                  { label: 'Current Stock', key: 'stock_quantity', placeholder: '0', type: 'number', required: false },
+                ] as const).map(({ label, key, placeholder, type, required }) => (
                   <div key={key}>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      {label}{required && <span style={{ color: '#DC2626' }}> *</span>}
+                    </label>
                     <input
                       type={type}
                       className="input-field"
@@ -859,7 +865,10 @@ export default function InventoryPage() {
                 <button
                   className="btn-primary btn-sm"
                   onClick={async () => {
-                    if (!addForm.name.trim() || !addForm.sku.trim()) return
+                    if (!addForm.name.trim() || !addForm.sku.trim()) {
+                      setAddError('Product Name and SKU are required.')
+                      return
+                    }
                     setAddError('')
                     const payload = {
                       name: addForm.name.trim(),
@@ -919,19 +928,21 @@ export default function InventoryPage() {
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 {([
-                  { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text' },
-                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text' },
-                  { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text' },
-                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text' },
-                  { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text' },
-                  { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date' },
-                  { label: 'Unit Cost (Buying Price)', key: 'unit_cost', placeholder: '0.00', type: 'number' },
-                  { label: 'Selling Price', key: 'selling_price', placeholder: '0.00', type: 'number' },
-                  { label: 'Reorder Level', key: 'reorder_level', placeholder: '0', type: 'number' },
-                  { label: 'Current Stock', key: 'stock_quantity', placeholder: '0', type: 'number' },
-                ] as const).map(({ label, key, placeholder, type }) => (
+                  { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text', required: true },
+                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text', required: true },
+                  { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text', required: false },
+                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text', required: false },
+                  { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text', required: false },
+                  { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date', required: false },
+                  { label: 'Unit Cost (Buying Price)', key: 'unit_cost', placeholder: '0.00', type: 'number', required: false },
+                  { label: 'Selling Price', key: 'selling_price', placeholder: '0.00', type: 'number', required: false },
+                  { label: 'Reorder Level', key: 'reorder_level', placeholder: '0', type: 'number', required: false },
+                  { label: 'Current Stock', key: 'stock_quantity', placeholder: '0', type: 'number', required: false },
+                ] as const).map(({ label, key, placeholder, type, required }) => (
                   <div key={key}>
-                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      {label}{required && <span style={{ color: '#DC2626' }}> *</span>}
+                    </label>
                     <input
                       type={type}
                       className="input-field"
