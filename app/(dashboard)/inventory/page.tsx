@@ -178,11 +178,18 @@ export default function InventoryPage() {
   const openEditModal = (p: Product) => {
     setEditError('')
     setEditForm({
-      name: p.name, sku: p.sku, barcode: p.barcode, brand: p.brand,
-      batch_number: p.batch_number, expiry_date: p.expiry_date,
+      // Real inventory data commonly has these optional fields as NULL in
+      // the database (barcode/brand/batch/category/description are all
+      // optional on add). Passing NULL straight into the form's string
+      // state crashed saveEditedProduct() the moment it called .trim() on
+      // an untouched field — reproduced live: editing any product with a
+      // blank barcode threw "Cannot read properties of null (reading
+      // 'trim')" and the modal just sat there with no error shown.
+      name: p.name, sku: p.sku, barcode: p.barcode ?? '', brand: p.brand ?? '',
+      batch_number: p.batch_number ?? '', expiry_date: p.expiry_date ?? '',
       unit_cost: String(p.unit_cost), selling_price: String(p.selling_price),
       reorder_level: String(p.reorder_level), stock_quantity: String(p.stock_quantity),
-      category: p.category, description: p.description,
+      category: p.category ?? '', description: p.description ?? '',
     })
     setEditingProduct(p)
   }
