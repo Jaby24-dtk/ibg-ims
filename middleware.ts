@@ -61,11 +61,22 @@ export async function middleware(request: NextRequest) {
   // error page in place of the app — which is indistinguishable from a white
   // screen to a non-technical user. Treat a thrown error the same as "no user":
   // fall through to the normal unauthenticated redirect instead of crashing.
+  //
+  // A thrown error here (as opposed to getUser() resolving normally with
+  // { user: null, error }, which is how an actually-invalid/expired token comes
+  // back) means the request to Supabase's Auth server itself failed — a
+  // transient network blip, not a dead session. One immediate retry rides out
+  // that class of failure instead of signing an otherwise-valid user out over a
+  // single dropped request.
   let user: User | null = null
   try {
     ;({ data: { user } } = await supabase.auth.getUser())
-  } catch (err) {
-    console.error('middleware getUser() threw, treating as signed out:', err)
+  } catch {
+    try {
+      ;({ data: { user } } = await supabase.auth.getUser())
+    } catch (err) {
+      console.error('middleware getUser() threw twice, treating as signed out:', err)
+    }
   }
 
   const { pathname } = request.nextUrl

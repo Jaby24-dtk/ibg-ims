@@ -64,31 +64,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null
 
     ;(async () => {
+      const supabase = createClient()
+
+      // One retry on a thrown error before giving up: a throw here means the
+      // call itself failed (a dropped request, a momentary Supabase hiccup),
+      // not that the session is actually invalid — getSession() resolves
+      // normally with session: null for that case. Bailing out on the first
+      // failure was signing perfectly valid sessions out over transient blips.
+      let session
       try {
-        const supabase = createClient()
-
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!mounted) return
-
-        setUser(session?.user ?? null)
-        setLoading(false)
-        if (session?.user) fetchProfile(session.user.id)
-
-        const { data } = supabase.auth.onAuthStateChange(
-          async (_event, session) => {
-            if (!mounted) return
-            setUser(session?.user ?? null)
-            if (session?.user) {
-              fetchProfile(session.user.id)
-            } else {
-              setProfile(null)
-            }
-          }
-        )
-        subscription = data.subscription
+        ;({ data: { session } } = await supabase.auth.getSession())
       } catch {
-        if (mounted) setLoading(false)
+        try {
+          ;({ data: { session } } = await supabase.auth.getSession())
+        } catch {
+          if (mounted) setLoading(false)
+          return
+        }
       }
+      if (!mounted) return
+
+      setUser(session?.user ?? null)
+      setLoading(false)
+      if (session?.user) fetchProfile(session.user.id)
+
+      const { data } = supabase.auth.onAuthStateChange(
+        async (_event, session) => {
+          if (!mounted) return
+          setUser(session?.user ?? null)
+          if (session?.user) {
+            fetchProfile(session.user.id)
+          } else {
+            setProfile(null)
+          }
+        }
+      )
+      subscription = data.subscription
     })()
 
     return () => { mounted = false; subscription?.unsubscribe() }
