@@ -1,14 +1,13 @@
 'use client'
 
-import { useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { Shield } from 'lucide-react'
 
-function StatusScreen({ message }: { message: string }) {
+function StatusScreen({ message, debug }: { message: string; debug?: string }) {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#F8FAFC', flexDirection: 'column', gap: 16,
+      background: '#F8FAFC', flexDirection: 'column', gap: 16, padding: 24,
     }}>
       <div style={{
         width: 48, height: 48, borderRadius: 14,
@@ -18,15 +17,35 @@ function StatusScreen({ message }: { message: string }) {
         <Shield size={24} color="white" />
       </div>
       <div style={{ fontSize: 14, color: '#64748B', fontWeight: 500 }}>{message}</div>
-      <div style={{
-        width: 160, height: 3, background: '#E2E8F0', borderRadius: 999, overflow: 'hidden',
-      }}>
+      {!debug && (
         <div style={{
-          height: '100%', borderRadius: 999,
-          background: 'linear-gradient(90deg, #2FA6B8, #38BDF8)',
-          animation: 'loadBar 1.2s ease-in-out infinite',
-        }} />
-      </div>
+          width: 160, height: 3, background: '#E2E8F0', borderRadius: 999, overflow: 'hidden',
+        }}>
+          <div style={{
+            height: '100%', borderRadius: 999,
+            background: 'linear-gradient(90deg, #2FA6B8, #38BDF8)',
+            animation: 'loadBar 1.2s ease-in-out infinite',
+          }} />
+        </div>
+      )}
+      {debug && (
+        <>
+          <div style={{
+            background: '#0F172A', color: '#E2E8F0', borderRadius: 10, padding: '14px 16px',
+            fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            maxWidth: 700, maxHeight: 320, overflow: 'auto',
+          }}>
+            {debug}
+          </div>
+          <button
+            className="btn-primary"
+            style={{ padding: '10px 18px', fontSize: 14 }}
+            onClick={() => { window.location.href = '/login' }}
+          >
+            Go to Login
+          </button>
+        </>
+      )}
       <style>{`
         @keyframes loadBar {
           0%   { width: 0%;   margin-left: 0%; }
@@ -39,37 +58,34 @@ function StatusScreen({ message }: { message: string }) {
 }
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, isMockMode } = useAuth()
+  const { user, profile, loading, isMockMode, authDebug } = useAuth()
 
-  useEffect(() => {
-    if (!loading && !isMockMode && !user) {
-      // A hard navigation, not router.replace(). This client-side "no user"
-      // read and the middleware's own server-side check can genuinely
-      // disagree for a moment (e.g. a token that's mid-refresh) — if
-      // middleware still considers the session valid, router.replace('/login')
-      // gets bounced straight back to /dashboard by middleware's own
-      // "authenticated user on /login → redirect to /dashboard" rule, client
-      // sees "no user" again, tries again, and the two sides ping-pong
-      // forever. That looked like this screen being permanently "stuck" —
-      // reported by two different users at once. A full page load forces one
-      // clean, authoritative middleware check on fresh cookies instead of
-      // trusting client-side state that may have already diverged from it.
-      window.location.href = '/login'
-    }
-  }, [loading, isMockMode, user])
+  // TEMP DIAGNOSTIC (2026-08-19): the auto-redirect to /login is disabled
+  // while this is in place — see the "Go to Login" button on the debug panel
+  // below instead. Remove this whole diagnostic block (and re-enable the
+  // useEffect redirect) once the post-middleware-fix bounce-back is
+  // root-caused. Middleware now trusts a locally-valid cookie and lets the
+  // request through to /dashboard, but the browser's own client-side check
+  // (AuthContext) is then separately concluding there's no user — this panel
+  // shows exactly what that check saw.
+  //
+  // useEffect(() => {
+  //   if (!loading && !isMockMode && !user) {
+  //     window.location.href = '/login'
+  //   }
+  // }, [loading, isMockMode, user])
 
   if (loading) {
     return <StatusScreen message="Loading I-BG CT Inventory System…" />
   }
 
-  // A session that goes invalid mid-use (expired token, a failed background
-  // refresh) lands here too, not just the initial load — router.replace()
-  // above is async and can lag a beat behind this render. This used to
-  // `return null`, which is a true blank/white screen for however long that
-  // takes; show the same branded status screen instead so a mid-session
-  // sign-out never looks like the app crashed.
   if (!isMockMode && !user) {
-    return <StatusScreen message="Session expired — redirecting to login…" />
+    return (
+      <StatusScreen
+        message="No user — this is what AuthContext saw:"
+        debug={authDebug ?? '(no debug info captured)'}
+      />
+    )
   }
 
   return <>{children}</>

@@ -17,11 +17,15 @@ interface AuthContextValue {
   profile: Profile | null
   loading: boolean
   isMockMode: boolean
+  // TEMP DIAGNOSTIC (2026-08-19): what the client-side session check actually
+  // saw, surfaced by AuthGate when user ends up null. Remove alongside the
+  // debug panel in AuthGate.tsx once root-caused.
+  authDebug: string | null
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null, profile: null, loading: true,
-  isMockMode: false,
+  isMockMode: false, authDebug: null,
 })
 
 const MOCK_PROFILE: Profile = {
@@ -37,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [authDebug, setAuthDebug] = useState<string | null>(null)
   const isMockMode = !getIsConfigured()
 
   const fetchProfile = useCallback(async (userId: string) => {
@@ -72,25 +77,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // normally with session: null for that case. Bailing out on the first
       // failure was signing perfectly valid sessions out over transient blips.
       let session
+      let getSessionError: unknown = null
       try {
         ;({ data: { session } } = await supabase.auth.getSession())
-      } catch {
+      } catch (err) {
+        getSessionError = err
         try {
           ;({ data: { session } } = await supabase.auth.getSession())
-        } catch {
-          if (mounted) setLoading(false)
+          getSessionError = null
+        } catch (err2) {
+          getSessionError = err2
+          if (mounted) {
+            setAuthDebug(
+              `getSession() threw twice.\nerror: ${String(err2)}\n\ndocument.cookie:\n${document.cookie || '(empty)'}`
+            )
+            setLoading(false)
+          }
           return
         }
       }
       if (!mounted) return
+
+      // TEMP DIAGNOSTIC (2026-08-19): remove alongside AuthGate's debug panel.
+      setAuthDebug(
+        `getSession() on mount:\n` +
+        `session present: ${!!session}\n` +
+        `user present: ${!!session?.user}\n` +
+        `expires_at: ${session?.expires_at ?? '(none)'} (${session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'n/a'})\n` +
+        `now: ${new Date().toISOString()}\n` +
+        `getSessionError: ${getSessionError ? String(getSessionError) : '(none)'}\n\n` +
+        `document.cookie:\n${document.cookie || '(empty)'}`
+      )
 
       setUser(session?.user ?? null)
       setLoading(false)
       if (session?.user) fetchProfile(session.user.id)
 
       const { data } = supabase.auth.onAuthStateChange(
-        async (_event, session) => {
+        async (event, session) => {
           if (!mounted) return
+          // TEMP DIAGNOSTIC: only overwrite the debug panel when this event is
+          // the one leaving user null, so the login-time snapshot above isn't
+          // lost if this fires with a valid session right after mount.
+          if (!session?.user) {
+            setAuthDebug(
+              `onAuthStateChange fired:\n` +
+              `event: ${event}\n` +
+              `session present: ${!!session}\n\n` +
+              `document.cookie:\n${document.cookie || '(empty)'}`
+            )
+          }
           setUser(session?.user ?? null)
           if (session?.user) {
             fetchProfile(session.user.id)
@@ -106,7 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isMockMode, fetchProfile])
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isMockMode }}>
+    <AuthContext.Provider value={{ user, profile, loading, isMockMode, authDebug }}>
       {children}
     </AuthContext.Provider>
   )
