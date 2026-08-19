@@ -104,8 +104,17 @@ export default function LoginPage() {
         setLoading(false)
       } else {
         resetAttempts()
-        router.push('/dashboard')
-        router.refresh()
+        // A hard navigation, not router.push(). signInWithPassword() writes the
+        // session cookie, but a client-side router.push() immediately fires a
+        // transition to /dashboard that still goes through middleware — if that
+        // cookie write hasn't propagated to the browser's cookie jar yet,
+        // middleware reads the pre-login cookies, sees no session, and bounces
+        // straight back to /login with no error shown (this looked like sign-in
+        // silently failing: "Signing in…" flashes, then a fresh /login, no
+        // error banner, because it's a real bounce-back, not a rejected
+        // credential). A full page load guarantees the just-written cookie is
+        // what middleware actually reads.
+        window.location.href = '/dashboard'
       }
     } catch (err) {
       setError(
