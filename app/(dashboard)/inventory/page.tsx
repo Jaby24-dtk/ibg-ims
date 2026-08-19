@@ -442,6 +442,22 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {deleteError && (
+        <div style={{
+          background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10,
+          padding: '10px 14px', fontSize: 13, color: '#991B1B',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        }}>
+          {deleteError}
+          <button
+            onClick={() => setDeleteError('')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991B1B', padding: 0, flexShrink: 0 }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Barcode Scanner Panel */}
       {scanMode && (
         <div className="card" style={{ padding: 20, borderLeft: '4px solid #2FA6B8' }}>
@@ -688,6 +704,21 @@ export default function InventoryPage() {
                           title="Edit"
                         >
                           <Edit2 size={14} />
+                        </button>
+                      )}
+                      {canEdit(role) && (
+                        <button
+                          onClick={() => deleteProduct(p)}
+                          disabled={deletingId === p.id}
+                          style={{
+                            width: 30, height: 30, borderRadius: 8, border: '1px solid #FECACA',
+                            background: 'white', cursor: deletingId === p.id ? 'default' : 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#DC2626', transition: 'all 0.15s', opacity: deletingId === p.id ? 0.5 : 1,
+                          }}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
                         </button>
                       )}
                     </div>
