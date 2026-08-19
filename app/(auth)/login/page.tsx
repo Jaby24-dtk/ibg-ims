@@ -39,12 +39,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [lockedFor, setLockedFor] = useState(0)
-  // TEMP DIAGNOSTIC (2026-08-19) — remove once the post-login bounce-back to
-  // /login is root-caused. Shows what actually landed in document.cookie
-  // right after a successful sign-in, plus any @supabase/ssr console
-  // warnings, directly on the page so it can be screenshotted without
-  // opening DevTools.
-  const [debugInfo, setDebugInfo] = useState<string | null>(null)
   const mockMode = !isSupabaseConfigured()
 
   useEffect(() => {
@@ -79,15 +73,6 @@ export default function LoginPage() {
       return
     }
 
-    // TEMP DIAGNOSTIC: capture any console.warn the SDK fires during sign-in
-    // (this is where @supabase/ssr logs chunked-cookie-corruption warnings).
-    const capturedWarnings: string[] = []
-    const originalWarn = console.warn
-    console.warn = (...args: unknown[]) => {
-      capturedWarnings.push(args.map(a => String(a)).join(' '))
-      originalWarn(...args)
-    }
-
     try {
       const supabase = createClient()
       // Defensive: clear any stale local session before signing in, so a leftover
@@ -101,11 +86,10 @@ export default function LoginPage() {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('TIMEOUT')), 15000)
       )
-      const { data: authData, error: authError } = await Promise.race([
+      const { error: authError } = await Promise.race([
         supabase.auth.signInWithPassword({ email, password }),
         timeout,
       ])
-      console.warn = originalWarn
       if (authError) {
         recordFail()
         const mins = minutesLocked()
@@ -120,17 +104,12 @@ export default function LoginPage() {
         setLoading(false)
       } else {
         resetAttempts()
-        // TEMP DIAGNOSTIC: show what's actually in document.cookie right now
-        // instead of navigating immediately, so this can be screenshotted.
-        setLoading(false)
-        setDebugInfo(
-          `Sign-in succeeded. session present: ${!!authData?.session}\n\n` +
-          `document.cookie right now:\n${document.cookie || '(empty — no cookies at all)'}\n\n` +
-          `SDK warnings during sign-in:\n${capturedWarnings.length ? capturedWarnings.join('\n') : '(none)'}`
-        )
+        // A hard navigation, not router.push(): guarantees middleware reads
+        // the cookie that signInWithPassword() just wrote, rather than racing
+        // a client-side transition against that write.
+        window.location.href = '/dashboard'
       }
     } catch (err) {
-      console.warn = originalWarn
       setError(
         err instanceof Error && err.message === 'TIMEOUT'
           ? 'Sign-in is taking too long. Check your connection and try again.'
@@ -276,36 +255,14 @@ export default function LoginPage() {
               </div>
             )}
 
-            {debugInfo && (
-              <div style={{
-                background: '#0F172A', color: '#E2E8F0',
-                borderRadius: 10, padding: '14px 16px',
-                fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all', maxHeight: 320, overflow: 'auto',
-              }}>
-                {debugInfo}
-              </div>
-            )}
-
-            {debugInfo ? (
-              <button
-                type="button"
-                className="btn-primary"
-                style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15 }}
-                onClick={() => { window.location.href = '/dashboard' }}
-              >
-                Continue to Dashboard
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={loading || lockedFor > 0}
-                className="btn-primary"
-                style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15, opacity: (loading || lockedFor > 0) ? 0.7 : 1 }}
-              >
-                {loading ? 'Signing in...' : lockedFor > 0 ? `Locked — try in ${lockedFor}m` : 'Sign in to I-BG CT Asia IMS'}
-              </button>
-            )}
+            <button
+              type="submit"
+              disabled={loading || lockedFor > 0}
+              className="btn-primary"
+              style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15, opacity: (loading || lockedFor > 0) ? 0.7 : 1 }}
+            >
+              {loading ? 'Signing in...' : lockedFor > 0 ? `Locked — try in ${lockedFor}m` : 'Sign in to I-BG CT Asia IMS'}
+            </button>
           </form>
 
           {mockMode && (

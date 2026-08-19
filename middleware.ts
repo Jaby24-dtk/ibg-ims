@@ -1,10 +1,64 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import type { User } from '@supabase/supabase-js'
-import { AUTH_COOKIE_OPTIONS } from './lib/supabase/config'
 
-export async function middleware(request: NextRequest) {
+function base64UrlDecode(str: string): string {
+  const base64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+  const binary = atob(padded)
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+// Reads the Supabase session straight out of the request cookie and checks
+// its own embedded `expires_at` — no call to Supabase's Auth API at all.
+//
+// Every previous version of this check (getSession(), then getUser()) called
+// Supabase's servers on every single request. That's what caused the entire
+// chain of bugs today: a client/server refresh race tripped a request-rate
+// spike, which got Supabase's Auth API rate-limited (confirmed via runtime
+// logs: `over_request_rate_limit`, 429), after which even *fresh, successful*
+// sign-ins kept bouncing back to /login — the cookie was correct the whole
+// time, but middleware's own validation call to Supabase was failing. A
+// getUser()-only call also isn't reliably refresh-free in practice: "Invalid
+// Refresh Token" errors kept firing from middleware on plain /login loads
+// with no sign-in attempt at all, which shouldn't be possible if getUser()
+// truly never touches the refresh token — something in the server client's
+// own session hydration was attempting one anyway.
+//
+// Middleware's job here is a UX redirect, not the actual security boundary —
+// real data access is authorized by Supabase's RLS policies using the JWT on
+// each query, independent of this check. So there's nothing lost by making
+// this purely local: read the cookie, check the token hasn't expired by its
+// own embedded timestamp, done. No network call means no rate limit exposure
+// and no dependency on Supabase's Auth API being healthy just to view a page.
+function isSessionValid(request: NextRequest): boolean {
+  const authCookies = request.cookies
+    .getAll()
+    .filter(c => /^sb-.*-auth-token(\.\d+)?$/.test(c.name))
+    .sort((a, b) => {
+      const an = a.name.match(/\.(\d+)$/)
+      const bn = b.name.match(/\.(\d+)$/)
+      if (!an && !bn) return 0
+      if (!an) return -1
+      if (!bn) return 1
+      return Number(an[1]) - Number(bn[1])
+    })
+
+  if (authCookies.length === 0) return false
+
+  const raw = authCookies.map(c => c.value).join('')
+  const jsonStr = raw.startsWith('base64-') ? base64UrlDecode(raw.slice(7)) : raw
+
+  try {
+    const session = JSON.parse(jsonStr)
+    const expiresAt = session?.expires_at
+    return typeof expiresAt === 'number' && expiresAt * 1000 > Date.now()
+  } catch {
+    return false
+  }
+}
+
+export function middleware(request: NextRequest) {
   const csp = [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
@@ -16,69 +70,14 @@ export async function middleware(request: NextRequest) {
     "frame-ancestors 'self' https://command.iamstivai.com",
   ].join('; ')
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
-  const configured = supabaseUrl.length > 0 && !supabaseUrl.includes('your-project-ref')
-
-  if (!configured) {
-    const res = NextResponse.next()
-    res.headers.set('Content-Security-Policy', csp)
-    return res
-  }
-
-  const requestHeaders = new Headers(request.headers)
-
-  let response = NextResponse.next({ request: { headers: requestHeaders } })
+  const response = NextResponse.next()
   response.headers.set('Content-Security-Policy', csp)
 
-  const supabase = createServerClient(supabaseUrl, supabaseKey, {
-    cookieOptions: AUTH_COOKIE_OPTIONS,
-    cookies: {
-      getAll() { return request.cookies.getAll() },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-        response = NextResponse.next({ request: { headers: requestHeaders } })
-        response.headers.set('Content-Security-Policy', csp)
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options)
-        )
-      },
-    },
-  })
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  const configured = supabaseUrl.length > 0 && !supabaseUrl.includes('your-project-ref')
+  if (!configured) return response
 
-  // Verify against the Auth server rather than getSession(): getSession() silently
-  // triggers its own token refresh once the access token is within 90s of expiry,
-  // racing the browser's independent auto-refresh timer for the same refresh_token.
-  // Supabase rotates the refresh token on each use, so whichever side loses that
-  // race gets an already-invalidated token and is forced signed out — surfacing as
-  // a blank dashboard roughly once an hour. getUser() only checks the existing
-  // token and never refreshes, leaving the browser client as the sole refresher.
-  //
-  // getUser() can also throw outright (not just resolve with an error) when the
-  // cookie holds a token from a stale/incompatible session — e.g. a browser that
-  // still has a cookie set under an older AUTH_COOKIE_OPTIONS shape. Unhandled,
-  // that exception crashes the whole middleware function and Vercel serves a bare
-  // error page in place of the app — which is indistinguishable from a white
-  // screen to a non-technical user. Treat a thrown error the same as "no user":
-  // fall through to the normal unauthenticated redirect instead of crashing.
-  //
-  // A thrown error here (as opposed to getUser() resolving normally with
-  // { user: null, error }, which is how an actually-invalid/expired token comes
-  // back) means the request to Supabase's Auth server itself failed — a
-  // transient network blip, not a dead session. One immediate retry rides out
-  // that class of failure instead of signing an otherwise-valid user out over a
-  // single dropped request.
-  let user: User | null = null
-  try {
-    ;({ data: { user } } = await supabase.auth.getUser())
-  } catch {
-    try {
-      ;({ data: { user } } = await supabase.auth.getUser())
-    } catch (err) {
-      console.error('middleware getUser() threw twice, treating as signed out:', err)
-    }
-  }
-
+  const authed = isSessionValid(request)
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
   const isRoot = pathname === '/'
@@ -87,15 +86,13 @@ export async function middleware(request: NextRequest) {
   // must be reachable before a session cookie exists.
   const isSsoBridge = pathname === '/sso'
 
-  // Redirect unauthenticated users to /login
-  if (!user && !isLoginPage && !isRoot && !isSsoBridge) {
+  if (!authed && !isLoginPage && !isRoot && !isSsoBridge) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // Redirect authenticated users away from /login
-  if (user && isLoginPage) {
+  if (authed && isLoginPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
