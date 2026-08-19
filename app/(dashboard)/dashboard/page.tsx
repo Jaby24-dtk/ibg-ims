@@ -11,6 +11,7 @@ import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, daysUntil } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { syncStockAndExpiryAlerts } from '@/lib/generate-alerts'
 
 const supabaseConfigured = (() => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -41,7 +42,11 @@ export default function DashboardPage() {
       ])
       if (cancelled) return
       if (productsRes.error) console.error('Failed to load products:', productsRes.error)
-      else setProducts((productsRes.data ?? []) as Product[])
+      else {
+        const loaded = (productsRes.data ?? []) as Product[]
+        setProducts(loaded)
+        syncStockAndExpiryAlerts(sb, loaded)
+      }
       if (txRes.error) console.error('Failed to load transactions:', txRes.error)
       else setTransactions((txRes.data ?? []) as Transaction[])
       if (outboundRes.error) console.error('Failed to load sales:', outboundRes.error)

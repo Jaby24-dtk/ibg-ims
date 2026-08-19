@@ -285,6 +285,13 @@ export default function PurchaseOrdersPage() {
                       const { data, error } = await sb.from('purchase_orders').insert(payload).select().single()
                       if (error) { console.error('Failed to create purchase order:', error); return }
                       setOrders(prev => [data as PurchaseOrder, ...prev])
+                      const supplierName = suppliers.find(s => s.id === payload.supplier_id)?.name
+                      const { error: alertError } = await sb.from('alerts').insert({
+                        type: 'new_purchase_order',
+                        message: `New purchase order ${payload.order_number} created${supplierName ? ` for ${supplierName}` : ''}.`,
+                        status: 'unread',
+                      })
+                      if (alertError) console.error('Failed to create PO alert:', alertError)
                     } else {
                       const newOrder: PurchaseOrder = {
                         ...payload,
