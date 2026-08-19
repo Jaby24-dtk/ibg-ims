@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { Shield } from 'lucide-react'
 
@@ -41,13 +40,23 @@ function StatusScreen({ message }: { message: string }) {
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, isMockMode } = useAuth()
-  const router = useRouter()
 
   useEffect(() => {
     if (!loading && !isMockMode && !user) {
-      router.replace('/login')
+      // A hard navigation, not router.replace(). This client-side "no user"
+      // read and the middleware's own server-side check can genuinely
+      // disagree for a moment (e.g. a token that's mid-refresh) — if
+      // middleware still considers the session valid, router.replace('/login')
+      // gets bounced straight back to /dashboard by middleware's own
+      // "authenticated user on /login → redirect to /dashboard" rule, client
+      // sees "no user" again, tries again, and the two sides ping-pong
+      // forever. That looked like this screen being permanently "stuck" —
+      // reported by two different users at once. A full page load forces one
+      // clean, authoritative middleware check on fresh cookies instead of
+      // trusting client-side state that may have already diverged from it.
+      window.location.href = '/login'
     }
-  }, [loading, isMockMode, user, router])
+  }, [loading, isMockMode, user])
 
   if (loading) {
     return <StatusScreen message="Loading I-BG CT Inventory System…" />
