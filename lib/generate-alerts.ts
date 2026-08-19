@@ -10,14 +10,19 @@ import { formatDate } from '@/lib/utils'
 // current product state once and backfills whatever's missing. Called from
 // the Dashboard on load, since that's the page everyone lands on.
 //
-// Idempotent by design: an unread alert already covering a product/condition
-// blocks a duplicate. Stock alerts are deduped per product regardless of
-// exact type (low vs out) — a product going from low to out of stock while
-// its low-stock alert is still unread does *not* get a second alert; it'd
-// otherwise leave a stale "low stock" alert sitting next to an "out of
-// stock" one for the same product. Marking the old one read (via the normal
-// Alerts page) before the state changes again is what clears the way for a
-// fresh, accurate one.
+// Idempotent by design: ANY existing alert (read or unread) for a given
+// product/condition blocks a duplicate — not just unread ones. Originally
+// this only checked unread alerts, which meant marking an alert read while
+// the underlying condition was still true (e.g. a product that's still
+// expired) got silently undone the next time anyone loaded the Dashboard: a
+// fresh, identical unread alert would reappear immediately. Reproduced live
+// (2026-08-19) — marking a "has expired" alert read, then revisiting
+// Dashboard, brought back a brand new unread copy of the exact same alert.
+// Marking read is meant to be a lasting acknowledgment, like email or GitHub
+// notifications, not something that resets on the next page load. Stock
+// alerts are deduped per product regardless of exact type (low vs out) — a
+// product going from low to out of stock while its low-stock alert already
+// exists does *not* get a second alert.
 export async function syncStockAndExpiryAlerts(sb: SupabaseClient, products: Product[]) {
   type NeededAlert = { type: 'low_stock' | 'out_of_stock' | 'expiring_product'; product_id: string; message: string }
   const needed: NeededAlert[] = []
@@ -54,7 +59,6 @@ export async function syncStockAndExpiryAlerts(sb: SupabaseClient, products: Pro
   const { data: existing, error: fetchError } = await sb
     .from('alerts')
     .select('type, product_id')
-    .eq('status', 'unread')
     .in('type', ['low_stock', 'out_of_stock', 'expiring_product'])
 
   if (fetchError) { console.error('Failed to check existing alerts:', fetchError); return }
