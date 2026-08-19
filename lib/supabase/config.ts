@@ -4,25 +4,23 @@ export function isSupabaseConfigured(): boolean {
   return url.length > 0 && !url.includes('your-project-ref')
 }
 
-// IMS is embedded as a cross-origin iframe inside STIV's Systems panel
-// (the SSO bridge at app/sso). A default `SameSite=Lax` session cookie is
-// never sent on that cross-site subrequest, so the embedded session looked
-// signed-out even though the token hand-off itself succeeded. `SameSite=None`
-// makes the cookie eligible for third-party contexts, which is what actually
-// fixes the embed.
+// `SameSite=None` was added 2026-08-13 so the session cookie would survive
+// being embedded as a cross-origin iframe inside STIV's Systems panel — the
+// default `Lax` cookie is never sent on that cross-site subrequest.
 //
-// `partitioned: true` (CHIPS) was added on top of that as a privacy
-// hardening — scoping the cookie to the embedding site instead of it being a
-// plain third-party cookie — but it's NOT required for the embed to work,
-// and Safari's CHIPS support turned out to be too immature to trust: it was
-// silently failing to persist the cookie even on normal, non-embedded,
-// direct top-level visits (confirmed 2026-08-18 — every sign-in attempt in
-// Safari succeeded against Supabase but the resulting session cookie never
-// reached the next request, so middleware saw no user and bounced straight
-// back to /login — an infinite "stuck signing in" loop). Dropped
-// `partitioned` to restore normal Safari compatibility; the STIV iframe
-// embed only ever needed `SameSite=None; Secure`.
+// Reverted 2026-08-19: `None` is the most heavily scrutinized cookie setting
+// across browsers (it's the classic third-party-tracking configuration), and
+// it's been a repeat source of exactly this class of bug — Safari silently
+// failed to persist it at all (fixed 2026-08-18 by dropping `partitioned`),
+// and two users hit a *write-succeeds-but-reads-back-as-no-session* failure
+// on it in Chrome/Edge on 2026-08-19 that no amount of navigation-timing
+// fixes resolved. `Lax` is Supabase's own SDK default for good reason, and
+// every navigation in this app is now a real page load rather than a
+// client-side transition (see AuthGate.tsx, login/page.tsx), so `Lax` is
+// fully sufficient for direct sign-in — which is the primary, must-work use
+// case. This trades away the STIV iframe embed working until that's
+// revisited separately; direct login reliability takes priority.
 export const AUTH_COOKIE_OPTIONS = {
-  sameSite: 'none' as const,
+  sameSite: 'lax' as const,
   secure: true,
 }
