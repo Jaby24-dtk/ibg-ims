@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import type { User } from '@supabase/supabase-js'
 import { AUTH_COOKIE_OPTIONS } from './lib/supabase/config'
 
 export async function middleware(request: NextRequest) {
@@ -52,7 +53,20 @@ export async function middleware(request: NextRequest) {
   // race gets an already-invalidated token and is forced signed out — surfacing as
   // a blank dashboard roughly once an hour. getUser() only checks the existing
   // token and never refreshes, leaving the browser client as the sole refresher.
-  const { data: { user } } = await supabase.auth.getUser()
+  //
+  // getUser() can also throw outright (not just resolve with an error) when the
+  // cookie holds a token from a stale/incompatible session — e.g. a browser that
+  // still has a cookie set under an older AUTH_COOKIE_OPTIONS shape. Unhandled,
+  // that exception crashes the whole middleware function and Vercel serves a bare
+  // error page in place of the app — which is indistinguishable from a white
+  // screen to a non-technical user. Treat a thrown error the same as "no user":
+  // fall through to the normal unauthenticated redirect instead of crashing.
+  let user: User | null = null
+  try {
+    ;({ data: { user } } = await supabase.auth.getUser())
+  } catch (err) {
+    console.error('middleware getUser() threw, treating as signed out:', err)
+  }
 
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
