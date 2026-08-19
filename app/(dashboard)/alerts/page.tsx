@@ -20,10 +20,21 @@ const alertConfig: Record<AlertType, { label: string; icon: React.ElementType; b
   inventory_discrepancy:   { label: 'Inventory Discrepancy',   icon: SlidersHorizontal, badge: 'badge-purple', color: '#7C3AED' },
 }
 
+const ALERT_TYPES = new Set<string>(['low_stock', 'out_of_stock', 'expiring_product', 'new_purchase_order', 'inventory_discrepancy'])
+
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>(supabaseConfigured ? [] : mockAlerts)
   const [typeFilter, setTypeFilter] = useState<'All' | AlertType>('All')
   const [statusFilter, setStatusFilter] = useState<'All' | 'unread' | 'read'>('All')
+
+  // Deep-link support for Dashboard's "Expiring Soon" View all (?type=
+  // expiring_product) — read via window.location rather than next/
+  // navigation's useSearchParams so this page can stay statically
+  // prerendered instead of needing a Suspense boundary.
+  useEffect(() => {
+    const type = new URLSearchParams(window.location.search).get('type')
+    if (type && ALERT_TYPES.has(type)) setTypeFilter(type as AlertType)
+  }, [])
 
   useEffect(() => {
     if (!supabaseConfigured) return
