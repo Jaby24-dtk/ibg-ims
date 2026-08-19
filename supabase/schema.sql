@@ -134,3 +134,12 @@ create policy "Staff can write transactions" on public.transactions for all usin
   exists (select 1 from public.users where id = auth.uid() and role in ('administrator','inventory_manager','staff'))
 );
 create policy "Authenticated update alerts" on public.alerts for update using (auth.role() = 'authenticated');
+-- No insert policy existed until 2026-08-19 — alerts had select and update
+-- policies (for the list page and mark-read) but nothing let any client
+-- write a new alert, RLS-blocking every insert attempt with 42501
+-- ("new row violates row-level security policy") the moment code that
+-- actually generates alerts was added. Matches the read/update policies'
+-- own scope (any authenticated user) rather than the staff-only write
+-- policies above — alerts are system-generated notifications a Dashboard
+-- visit triggers for any signed-in user, not user-authored data.
+create policy "Authenticated insert alerts" on public.alerts for insert with check (auth.role() = 'authenticated');
