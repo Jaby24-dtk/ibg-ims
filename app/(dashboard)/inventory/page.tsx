@@ -323,17 +323,35 @@ export default function InventoryPage() {
     if (scanMode) scanInputRef.current?.focus()
   }, [scanMode])
 
-  function parseCSVLine(line: string): string[] {
-    const result: string[] = []
-    let cur = '', inQuote = false
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]
-      if (ch === '"') { inQuote = !inQuote }
-      else if (ch === ',' && !inQuote) { result.push(cur); cur = '' }
-      else { cur += ch }
+  // Parse a whole CSV document into records of fields in a single pass.
+  // Handles quoted fields that contain commas, embedded newlines and escaped
+  // quotes (""), plus CRLF/CR/LF line endings and a leading UTF-8 BOM — so a
+  // file exported from this app round-trips back through import unchanged.
+  function parseCSV(text: string): string[][] {
+    const records: string[][] = []
+    let record: string[] = []
+    let cur = ''
+    let inQuote = false
+    let i = text.charCodeAt(0) === 0xFEFF ? 1 : 0
+    for (; i < text.length; i++) {
+      const ch = text[i]
+      if (inQuote) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { cur += '"'; i++ }
+          else inQuote = false
+        } else cur += ch
+        continue
+      }
+      if (ch === '"') inQuote = true
+      else if (ch === ',') { record.push(cur); cur = '' }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++
+        record.push(cur); records.push(record); record = []; cur = ''
+      } else cur += ch
     }
-    result.push(cur)
-    return result
+    if (cur !== '' || record.length > 0) { record.push(cur); records.push(record) }
+    // drop blank lines (all fields empty), matching the old behaviour
+    return records.filter(r => r.some(c => c.trim() !== ''))
   }
 
   function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -343,15 +361,15 @@ export default function InventoryPage() {
     const reader = new FileReader()
     reader.onload = (ev) => {
       const text = (ev.target?.result as string) ?? ''
-      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n').filter(l => l.trim())
-      if (lines.length < 2) { setCsvErrors(['CSV needs a header row and at least one data row.']); setCsvRows([]); setShowCsvModal(true); return }
+      const records = parseCSV(text)
+      if (records.length < 2) { setCsvErrors(['CSV needs a header row and at least one data row.']); setCsvRows([]); setShowCsvModal(true); return }
 
-      const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()₱#]/g, '').replace(/_+/g, '_'))
+      const headers = records[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()₱#]/g, '').replace(/_+/g, '_'))
       const rows: Partial<Product>[] = []
       const errors: string[] = []
 
-      for (let i = 1; i < lines.length; i++) {
-        const vals = parseCSVLine(lines[i])
+      for (let i = 1; i < records.length; i++) {
+        const vals = records[i]
         const row: Record<string, string> = {}
         headers.forEach((h, j) => { row[h] = (vals[j] ?? '').trim() })
 
