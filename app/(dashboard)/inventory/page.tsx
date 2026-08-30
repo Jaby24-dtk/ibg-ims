@@ -75,6 +75,7 @@ export default function InventoryPage() {
   const [addError, setAddError] = useState('')
   const [showCsvModal, setShowCsvModal] = useState(false)
   const [csvRows, setCsvRows] = useState<Partial<Product>[]>([])
+  const [csvBumps, setCsvBumps] = useState<{ existing: Product; addQty: number }[]>([])
   const [csvErrors, setCsvErrors] = useState<string[]>([])
   const scanInputRef = useRef<HTMLInputElement>(null)
   const csvFileRef = useRef<HTMLInputElement>(null)
@@ -354,57 +355,104 @@ export default function InventoryPage() {
     return records.filter(r => r.some(c => c.trim() !== ''))
   }
 
+  // Tolerant number parsing — strips currency symbols, thousands separators and
+  // stray spaces so "₱1,200.50" or "1 200" from a spreadsheet still import.
+  const parseNum = (s: string) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : 0 }
+  const parseInt10 = (s: string) => { const n = parseInt(String(s).replace(/[^0-9\-]/g, ''), 10); return Number.isFinite(n) ? n : 0 }
+
+  // Shared pipeline for CSV and Excel: takes a grid of cells (row 0 = headers),
+  // validates each data row, merges repeated SKUs within the file, then splits
+  // the result into brand-new products vs. existing SKUs whose stock we top up.
+  function ingestRecords(records: string[][]) {
+    if (records.length < 2) {
+      setCsvErrors(['The file needs a header row and at least one data row.'])
+      setCsvRows([]); setCsvBumps([]); setShowCsvModal(true); return
+    }
+
+    const headers = records[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()₱#]/g, '').replace(/_+/g, '_'))
+    const parsed: Partial<Product>[] = []
+    const errors: string[] = []
+
+    for (let i = 1; i < records.length; i++) {
+      const vals = records[i]
+      const row: Record<string, string> = {}
+      headers.forEach((h, j) => { row[h] = (vals[j] ?? '').trim() })
+
+      const name = row.name || row.product_name || row.item_name || ''
+      const sku = row.sku || row.sku_code || ''
+      if (!name) { errors.push(`Row ${i + 1}: missing product name`); continue }
+      if (!sku) { errors.push(`Row ${i + 1}: missing SKU`); continue }
+
+      parsed.push({
+        id: generateId(),
+        name,
+        sku,
+        barcode: row.barcode || '',
+        brand: row.brand || '',
+        category: (row.category || '').trim() || 'General',
+        description: row.description || '',
+        batch_number: row.batch_number || row.batch || '',
+        expiry_date: row.expiry_date || row.expiry || '',
+        unit_cost: parseNum(row.unit_cost || '0'),
+        selling_price: parseNum(row.selling_price || '0'),
+        reorder_level: parseInt10(row.reorder_level || '0'),
+        stock_quantity: parseInt10(row.stock_quantity || row.current_stock || row.quantity || '0'),
+        supplier_id: '',
+        image_url: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    }
+
+    // Same SKU listed twice in the file → one product, quantities summed.
+    const merged = new Map<string, Partial<Product>>()
+    for (const r of parsed) {
+      const key = (r.sku ?? '').trim().toLowerCase()
+      const prev = merged.get(key)
+      if (prev) prev.stock_quantity = (prev.stock_quantity ?? 0) + (r.stock_quantity ?? 0)
+      else merged.set(key, r)
+    }
+
+    const existingBySku = new Map(products.map(p => [p.sku.trim().toLowerCase(), p]))
+    const newRows: Partial<Product>[] = []
+    const bumps: { existing: Product; addQty: number }[] = []
+    for (const r of merged.values()) {
+      const match = existingBySku.get((r.sku ?? '').trim().toLowerCase())
+      if (match) bumps.push({ existing: match, addQty: r.stock_quantity ?? 0 })
+      else newRows.push(r)
+    }
+
+    setCsvRows(newRows)
+    setCsvBumps(bumps)
+    setCsvErrors(errors)
+    setShowCsvModal(true)
+  }
+
   function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+    const isExcel = /\.xlsx?$/i.test(file.name)
     const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = (ev.target?.result as string) ?? ''
-      const records = parseCSV(text)
-      if (records.length < 2) { setCsvErrors(['CSV needs a header row and at least one data row.']); setCsvRows([]); setShowCsvModal(true); return }
-
-      const headers = records[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[()₱#]/g, '').replace(/_+/g, '_'))
-      const rows: Partial<Product>[] = []
-      const errors: string[] = []
-
-      for (let i = 1; i < records.length; i++) {
-        const vals = records[i]
-        const row: Record<string, string> = {}
-        headers.forEach((h, j) => { row[h] = (vals[j] ?? '').trim() })
-
-        const name = row.name || row.product_name || row.item_name || ''
-        const sku = row.sku || row.sku_code || ''
-        if (!name) { errors.push(`Row ${i + 1}: missing product name`); continue }
-        if (!sku) { errors.push(`Row ${i + 1}: missing SKU`); continue }
-
-        const cat = (row.category || '').trim()
-        rows.push({
-          id: generateId(),
-          name,
-          sku,
-          barcode: row.barcode || '',
-          brand: row.brand || '',
-          category: cat || 'General',
-          description: row.description || '',
-          batch_number: row.batch_number || row.batch || '',
-          expiry_date: row.expiry_date || row.expiry || '',
-          unit_cost: parseFloat(row.unit_cost || '0') || 0,
-          selling_price: parseFloat(row.selling_price || '0') || 0,
-          reorder_level: parseInt(row.reorder_level || '0') || 0,
-          stock_quantity: parseInt(row.stock_quantity || row.current_stock || row.quantity || '0') || 0,
-          supplier_id: '',
-          image_url: '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+    reader.onload = async (ev) => {
+      try {
+        if (isExcel) {
+          const XLSX = await import('xlsx')
+          const wb = XLSX.read(new Uint8Array(ev.target?.result as ArrayBuffer), { type: 'array' })
+          const ws = wb.Sheets[wb.SheetNames[0]]
+          if (!ws) { setCsvErrors(['That Excel file has no sheets.']); setCsvRows([]); setCsvBumps([]); setShowCsvModal(true); return }
+          const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd', defval: '', blankrows: false }) as unknown[][]
+          ingestRecords(grid.map(r => r.map(c => (c == null ? '' : String(c)))))
+        } else {
+          ingestRecords(parseCSV((ev.target?.result as string) ?? ''))
+        }
+      } catch (err) {
+        setCsvErrors([`Could not read the file: ${err instanceof Error ? err.message : 'unknown error'}`])
+        setCsvRows([]); setCsvBumps([]); setShowCsvModal(true)
       }
-
-      setCsvRows(rows)
-      setCsvErrors(errors)
-      setShowCsvModal(true)
     }
-    reader.readAsText(file)
+    if (isExcel) reader.readAsArrayBuffer(file)
+    else reader.readAsText(file)
   }
 
   function downloadCsvTemplate() {
@@ -469,10 +517,10 @@ export default function InventoryPage() {
           )}
           {canEdit(role) && (
             <>
-              <input ref={csvFileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleCsvFile} />
+              <input ref={csvFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style={{ display: 'none' }} onChange={handleCsvFile} />
               <button className="btn-secondary btn-sm" onClick={() => csvFileRef.current?.click()}>
                 <Upload size={15} />
-                Import CSV
+                Import
               </button>
               <button className="btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
                 <Plus size={15} />
@@ -658,7 +706,7 @@ export default function InventoryPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-                {['Product', 'SKU / Barcode', 'Category', 'Stock', 'Reorder Lvl', 'Expiry', 'Status', 'Actions'].map(col => (
+                {['Product', 'SKU / Barcode', 'Category', 'Stock', 'Reorder Lvl', 'Expiry', 'Status', 'Date Added', 'Actions'].map(col => (
                   <th key={col} style={{
                     padding: '12px 16px', textAlign: 'left',
                     fontSize: 11, fontWeight: 700, color: '#64748B',
@@ -722,6 +770,9 @@ export default function InventoryPage() {
                     {statusBadge(p)}
                   </td>
                   <td style={{ padding: '14px 16px' }}>
+                    <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{formatDate(p.created_at)}</div>
+                  </td>
+                  <td style={{ padding: '14px 16px' }}>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
                         onClick={() => { setShowDetailModal(p); setDeleteError('') }}
@@ -768,14 +819,14 @@ export default function InventoryPage() {
               ))}
               {loadingProducts && filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
+                  <td colSpan={9} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
                     <div style={{ fontSize: 14 }}>Loading products…</div>
                   </td>
                 </tr>
               )}
               {!loadingProducts && filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
+                  <td colSpan={9} style={{ padding: 48, textAlign: 'center', color: '#94A3B8' }}>
                     <Package size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
                     <div style={{ fontSize: 14 }}>No products match your filters.</div>
                   </td>
@@ -1113,13 +1164,13 @@ export default function InventoryPage() {
 
       {/* CSV Import Modal */}
       {showCsvModal && (
-        <div className="modal-overlay" onClick={() => setShowCsvModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvBumps([]); setCsvErrors([]) }}>
           <div className="modal-box" style={{ width: 760, padding: 0, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div>
-                <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A' }}>Import Products from CSV</h2>
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A' }}>Import Products from CSV or Excel</h2>
                 <p style={{ fontSize: 13, color: '#64748B', marginTop: 2 }}>
-                  {csvRows.length} product{csvRows.length !== 1 ? 's' : ''} ready to import
+                  {csvRows.length} new · {csvBumps.length} existing to restock
                   {csvErrors.length > 0 && ` · ${csvErrors.length} error${csvErrors.length !== 1 ? 's' : ''}`}
                 </p>
               </div>
@@ -1128,7 +1179,7 @@ export default function InventoryPage() {
                   <Upload size={13} style={{ transform: 'rotate(180deg)' }} />
                   Download Template
                 </button>
-                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', padding: 4 }} onClick={() => setShowCsvModal(false)}>
+                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', padding: 4 }} onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvBumps([]); setCsvErrors([]) }}>
                   <X size={20} />
                 </button>
               </div>
@@ -1145,72 +1196,125 @@ export default function InventoryPage() {
                 </div>
               )}
 
-              {csvRows.length === 0 ? (
+              {csvRows.length === 0 && csvBumps.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px 0', color: '#94A3B8' }}>
                   <Package size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                  <div>No valid products found in the CSV file.</div>
+                  <div>No valid products found in the file.</div>
                   <button className="btn-secondary btn-sm" style={{ margin: '16px auto 0', display: 'flex' }} onClick={downloadCsvTemplate}>
                     Download Template CSV
                   </button>
                 </div>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                        {['Name', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Expiry'].map(col => (
-                          <th key={col} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{col}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {csvRows.map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>{r.name}</td>
-                          <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#374151' }}>{r.sku}</td>
-                          <td style={{ padding: '10px 12px' }}>
-                            <span className="badge badge-info">{r.category}</span>
-                          </td>
-                          <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.brand || '—'}</td>
-                          <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0F172A' }}>{r.stock_quantity ?? 0}</td>
-                          <td style={{ padding: '10px 12px', color: '#374151' }}>{r.unit_cost ? formatCurrency(r.unit_cost) : '—'}</td>
-                          <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.expiry_date ? formatDate(r.expiry_date) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  {csvBumps.length > 0 && (
+                    <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#075985', marginBottom: 8 }}>
+                        {csvBumps.length} SKU{csvBumps.length !== 1 ? 's' : ''} already in inventory — stock will be added, no duplicate created
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <tbody>
+                          {csvBumps.map((b, i) => (
+                            <tr key={b.existing.id} style={{ borderTop: i ? '1px solid #E0F2FE' : 'none' }}>
+                              <td style={{ padding: '6px 8px', fontWeight: 600, color: '#0F172A' }}>{b.existing.name}</td>
+                              <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: '#475569' }}>{b.existing.sku}</td>
+                              <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap' }}>
+                                {b.existing.stock_quantity} + {b.addQty} = <strong style={{ color: '#0F172A' }}>{b.existing.stock_quantity + b.addQty}</strong>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {csvRows.length > 0 && (
+                    <div style={{ overflowX: 'auto' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#64748B', marginBottom: 8 }}>
+                        {csvRows.length} new product{csvRows.length !== 1 ? 's' : ''}
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                            {['Name', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Expiry'].map(col => (
+                              <th key={col} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{col}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvRows.map((r, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                              <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>{r.name}</td>
+                              <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#374151' }}>{r.sku}</td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <span className="badge badge-info">{r.category}</span>
+                              </td>
+                              <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.brand || '—'}</td>
+                              <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0F172A' }}>{r.stock_quantity ?? 0}</td>
+                              <td style={{ padding: '10px 12px', color: '#374151' }}>{r.unit_cost ? formatCurrency(r.unit_cost) : '—'}</td>
+                              <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.expiry_date ? formatDate(r.expiry_date) : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
-            {csvRows.length > 0 && (
+            {(csvRows.length > 0 || csvBumps.length > 0) && (
               <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
-                <button className="btn-secondary btn-sm" onClick={() => setShowCsvModal(false)}>Cancel</button>
+                <button className="btn-secondary btn-sm" onClick={() => { setShowCsvModal(false); setCsvRows([]); setCsvBumps([]); setCsvErrors([]) }}>Cancel</button>
                 <button
                   className="btn-primary btn-sm"
                   onClick={async () => {
+                    const bumps = csvBumps.filter(b => b.addQty > 0)
                     if (supabaseConfigured) {
                       const sb = createClient()
-                      const payload = csvRows.map(r => ({
-                        name: r.name, sku: r.sku, barcode: r.barcode || null, brand: r.brand,
-                        category: r.category, description: r.description, batch_number: r.batch_number,
-                        expiry_date: r.expiry_date || null, unit_cost: r.unit_cost,
-                        selling_price: r.selling_price, reorder_level: r.reorder_level,
-                        stock_quantity: r.stock_quantity,
-                      }))
-                      const { data, error } = await sb.from('products').insert(payload).select()
-                      if (error) { setCsvErrors(prev => [...prev, `Import failed: ${error.message}`]); return }
-                      setProducts(prev => [...(data as Product[]), ...prev])
+                      if (csvRows.length > 0) {
+                        const payload = csvRows.map(r => ({
+                          name: r.name, sku: r.sku, barcode: r.barcode || null, brand: r.brand,
+                          category: r.category, description: r.description, batch_number: r.batch_number,
+                          expiry_date: r.expiry_date || null, unit_cost: r.unit_cost,
+                          selling_price: r.selling_price, reorder_level: r.reorder_level,
+                          stock_quantity: r.stock_quantity,
+                        }))
+                        const { data, error } = await sb.from('products').insert(payload).select()
+                        if (error) { setCsvErrors(prev => [...prev, `Import failed: ${error.message}`]); return }
+                        setProducts(prev => [...(data as Product[]), ...prev])
+                      }
+                      for (const b of bumps) {
+                        const newStock = b.existing.stock_quantity + b.addQty
+                        const { error: upErr } = await sb.from('products').update({ stock_quantity: newStock }).eq('id', b.existing.id)
+                        if (upErr) { setCsvErrors(prev => [...prev, `Stock update failed for ${b.existing.sku}: ${upErr.message}`]); return }
+                        await sb.from('transactions').insert({
+                          product_id: b.existing.id, sku: b.existing.sku, barcode: b.existing.barcode,
+                          type: 'inbound', quantity: b.addQty, user_id: user?.id ?? null,
+                          notes: 'Bulk import — stock added', unit_cost: b.existing.unit_cost, selling_price: b.existing.selling_price,
+                        })
+                        setProducts(prev => prev.map(p => p.id === b.existing.id ? { ...p, stock_quantity: newStock } : p))
+                      }
                     } else {
-                      setProducts(prev => [...(csvRows as Product[]), ...prev])
+                      if (csvRows.length > 0) setProducts(prev => [...(csvRows as Product[]), ...prev])
+                      for (const b of bumps) {
+                        setProducts(prev => prev.map(p => p.id === b.existing.id ? { ...p, stock_quantity: p.stock_quantity + b.addQty } : p))
+                      }
                     }
                     setShowCsvModal(false)
                     setCsvRows([])
+                    setCsvBumps([])
                     setCsvErrors([])
                   }}
                 >
                   <CheckCircle size={14} />
-                  Import {csvRows.length} Product{csvRows.length !== 1 ? 's' : ''}
+                  {(() => {
+                    const nNew = csvRows.length
+                    const nBump = csvBumps.filter(b => b.addQty > 0).length
+                    const parts: string[] = []
+                    if (nNew) parts.push(`${nNew} new`)
+                    if (nBump) parts.push(`${nBump} restock`)
+                    return `Import ${parts.join(' + ') || 'products'}`
+                  })()}
                 </button>
               </div>
             )}
