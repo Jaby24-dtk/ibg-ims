@@ -64,7 +64,8 @@ export default function ResetPasswordPage() {
         return
       }
       setStage('done')
-      setTimeout(() => { router.push('/dashboard'); router.refresh() }, 1500)
+      // Hard navigation so middleware reads the fresh session cookie (see login/page.tsx).
+      setTimeout(() => { window.location.href = '/dashboard' }, 1500)
     } catch {
       setError('Something went wrong. Please try again.')
       setLoading(false)
