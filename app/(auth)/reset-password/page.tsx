@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
     }}>
       <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, padding: 36 }}>
         <Image
-          src="/ibg-mark.png"
+          src="/ibg-logo-mark.png"
           alt="I-BG CT Asia"
           width={72}
           height={71}

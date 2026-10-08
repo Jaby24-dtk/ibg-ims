@@ -226,7 +226,7 @@ export default function LoginPage() {
         <div className="ib-orb" />
         <header className="ib-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <div className="ib-logo-circle"><img className="ib-logo" src="/ibg-mark.png" alt="I-BG CT Asia logo" /></div>
+          <div className="ib-logo-circle"><img className="ib-logo" src="/ibg-logo-mark.png" alt="I-BG CT Asia logo" /></div>
           <div className="ib-brand-label">I-BG CT ASIA<br />Inventory Management System</div>
         </header>
         <div className="ib-analytics" aria-hidden="true">
@@ -259,7 +259,7 @@ export default function LoginPage() {
       <section className="ib-login-side">
         <div className="ib-panel">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <div className="ib-panel-logo-circle"><img src="/ibg-mark.png" alt="I-BG CT Asia logo" className="ib-panel-logo" /></div>
+          <div className="ib-panel-logo-circle"><img src="/ibg-logo-mark.png" alt="I-BG CT Asia logo" className="ib-panel-logo" /></div>
           <h2>{forgotMode ? 'Reset password.' : 'Welcome back.'}</h2>
           <p className="ib-sub">
             {forgotMode

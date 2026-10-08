@@ -149,7 +149,7 @@ export default function ReportsPage() {
       location: settings.location,
       baseCurrency: base,
       logoUrl: `${window.location.origin}/company-logo.png`,
-      iconUrl: `${window.location.origin}/ibg-mark.png`,
+      iconUrl: `${window.location.origin}/ibg-logo-mark.png`,
       kpis: [
         { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), sub: 'Cost of stock on hand' },
         { label: 'Potential Profit', value: formatCurrency(totalPotentialProfit), sub: 'If all stock on hand sells' },
