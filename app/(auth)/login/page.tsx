@@ -48,7 +48,9 @@ const LOGIN_CSS = `
 .ib-brand{display:flex;align-items:center;gap:15px;position:relative;z-index:2}
 .ib-logo-circle{width:104px;height:104px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 10px 30px rgba(0,0,0,.35),0 0 0 4px rgba(77,228,236,.14)}
 .ib-logo{width:76px;height:76px;object-fit:contain}
-.ib-brand-label{font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:#b3cbd6;line-height:1.8}
+.ib-brand-label{display:flex;flex-direction:column;gap:6px;text-transform:uppercase}
+.ib-brand-name{font-size:30px;font-weight:800;letter-spacing:.08em;color:#fff;line-height:1}
+.ib-brand-sub{font-size:13px;font-weight:700;letter-spacing:.24em;color:#3bd2e2;line-height:1.3}
 .ib-content{position:relative;z-index:2;max-width:620px;padding:65px 0 45px}
 .ib-eyebrow{display:inline-flex;align-items:center;gap:10px;border:1px solid #54dbe744;border-radius:100px;padding:9px 15px;color:#b9edf0;font-size:10px;letter-spacing:.19em;font-weight:700}
 .ib-dot{width:6px;height:6px;background:#38d5e4;border-radius:50%;box-shadow:0 0 14px #36dce8}
@@ -100,7 +102,7 @@ const LOGIN_CSS = `
 @keyframes ibArrive{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:1160px){.ib-analytics{opacity:.65;right:1%;width:175px}.ib-content{max-width:480px}.ib-hero h1{font-size:55px}}
 @media(max-width:880px){.ib-layout{grid-template-columns:1fr}.ib-hero{min-height:650px;padding:35px}.ib-content{padding:65px 0}.ib-analytics{right:4%;top:22%}.ib-login-side{padding:70px 22px}.ib-panel{max-width:490px}.ib-hero .ib-features{max-width:550px}}
-@media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo-circle{width:78px;height:78px}.ib-logo{width:56px;height:56px}.ib-brand-label{font-size:9px}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
+@media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo-circle{width:78px;height:78px}.ib-logo{width:56px;height:56px}.ib-brand-name{font-size:22px}.ib-brand-sub{font-size:10px;letter-spacing:.18em}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
 @media(prefers-reduced-motion:reduce){.ib-layout *,.ib-layout *:before,.ib-layout *:after{animation:none!important;transition:none!important}}
 `
 
@@ -227,7 +229,7 @@ export default function LoginPage() {
         <header className="ib-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <div className="ib-logo-circle"><img className="ib-logo" src="/ibg-logo-mark.png" alt="I-BG CT Asia logo" /></div>
-          <div className="ib-brand-label">I-BG CT ASIA<br />Inventory Management System</div>
+          <div className="ib-brand-label"><span className="ib-brand-name">IBG Group</span><span className="ib-brand-sub">Inventory Management System</span></div>
         </header>
         <div className="ib-analytics" aria-hidden="true">
           <div className="ib-stat"><div className="ib-label">◈ Inventory health</div><strong><em>98%</em></strong><small>Illustrative dashboard preview</small><div className="ib-line"><i /></div></div>
