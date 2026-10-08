@@ -41,7 +41,7 @@ const LOGIN_CSS = `
 .ib-layout button{cursor:pointer}
 .ib-layout button:focus-visible,.ib-layout input:focus-visible{outline:3px solid #67dfe8;outline-offset:3px}
 .ib-hero{position:relative;isolation:isolate;overflow:hidden;min-height:820px;padding:clamp(35px,5vw,78px);display:flex;flex-direction:column;justify-content:space-between;background:radial-gradient(ellipse at 83% 50%,#0d3e4b 0%,#0b2232 38%,#06101b 76%)}
-.ib-hero:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(90deg,#06101b 2%,rgba(6,16,27,.91) 42%,rgba(6,16,27,.15) 100%),url('/login-warehouse.jpg') center right/cover no-repeat;opacity:.7}
+.ib-hero:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(90deg,#06101b 2%,rgba(6,16,27,.91) 42%,rgba(6,16,27,.15) 100%),url('/login-warehouse-v2.jpg') center right/cover no-repeat;opacity:.7}
 .ib-hero:after{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(circle at 80% 60%,transparent 8%,rgba(3,13,24,.55) 72%);pointer-events:none}
 .ib-mesh{position:absolute;inset:0;opacity:.13;background-image:linear-gradient(#4de4ec22 1px,transparent 1px),linear-gradient(90deg,#4de4ec22 1px,transparent 1px);background-size:58px 58px;-webkit-mask-image:linear-gradient(90deg,transparent,#000);mask-image:linear-gradient(90deg,transparent,#000);pointer-events:none}
 .ib-orb{position:absolute;width:440px;height:440px;right:-120px;top:18%;border-radius:50%;background:#20c8e4;filter:blur(140px);opacity:.12;animation:ibBreathe 7s ease-in-out infinite alternate}
