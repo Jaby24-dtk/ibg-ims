@@ -1,9 +1,9 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import type { UserRole } from '@/types'
-import { createClient } from '@/lib/supabase/client'
 
 export interface Profile {
   id: string
@@ -17,11 +17,12 @@ interface AuthContextValue {
   profile: Profile | null
   loading: boolean
   isMockMode: boolean
+  signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null, profile: null, loading: true,
-  isMockMode: false,
+  isMockMode: false, signOut: async () => {},
 })
 
 const MOCK_PROFILE: Profile = {
@@ -34,6 +35,7 @@ function getIsConfigured() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string) => {
     try {
+      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
       const { data } = await supabase
         .from('users')
@@ -64,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null
 
     ;(async () => {
+      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
 
       // One retry on a thrown error before giving up: a throw here means the
@@ -105,8 +109,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; subscription?.unsubscribe() }
   }, [isMockMode, fetchProfile])
 
+  const signOut = useCallback(async () => {
+    if (isMockMode) { router.push('/login'); return }
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    // Hard navigation so middleware sees the cleared cookie (see login/page.tsx).
+    window.location.href = '/login'
+  }, [isMockMode, router])
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isMockMode }}>
+    <AuthContext.Provider value={{ user, profile, loading, isMockMode, signOut }}>
       {children}
     </AuthContext.Provider>
   )

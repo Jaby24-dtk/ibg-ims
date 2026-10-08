@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Search, Bell, ChevronDown,
-  AlertTriangle, CheckCircle, Info,
+  AlertTriangle, CheckCircle, Info, LogOut,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { mockAlerts } from '@/lib/mock-data'
@@ -17,7 +17,8 @@ const roleLabels: Record<string, string> = {
 }
 
 export default function Header() {
-  const { profile } = useAuth()
+  const { profile, signOut } = useAuth()
+  const [signingOut, setSigningOut] = useState(false)
   const router = useRouter()
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -181,13 +182,28 @@ export default function Header() {
               boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
               width: 200, zIndex: 50, overflow: 'hidden',
             }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #F1F5F9' }}>
+              <div style={{ padding: '12px 16px' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{displayName}</div>
                 <div style={{ fontSize: 11, color: '#64748B' }}>{profile?.email ?? ''}</div>
                 {displayRole && (
                   <span className="badge badge-info" style={{ fontSize: 10, marginTop: 4 }}>{displayRole}</span>
                 )}
               </div>
+              <button
+                disabled={signingOut}
+                onClick={async () => { setSigningOut(true); await signOut() }}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '10px 16px', background: 'none', border: 'none',
+                  borderTop: '1px solid #F1F5F9', cursor: 'pointer',
+                  fontSize: 13, fontWeight: 600, color: '#DC2626', textAlign: 'left',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#FEF2F2')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+              >
+                <LogOut size={15} />
+                {signingOut ? 'Logging out…' : 'Log out'}
+              </button>
             </div>
           </>
         )}

@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
     if (!name || !email || !role || !password) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'Invalid email format' }, { status: 400 })
+    }
     if (!VALID_ROLES.includes(role)) {
       return NextResponse.json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
     }

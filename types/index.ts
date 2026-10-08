@@ -15,8 +15,13 @@ export interface Supplier {
   email: string
   phone: string
   address: string
+  /** Country the supplier ships/manufactures from. */
+  country?: string
+  /** Production/manufacturing lead time in days — how long after ordering the goods are ready. */
+  lead_time_days?: number
 }
 
+// Category names are managed in Settings → Categories (public.categories).
 export type ProductCategory = string
 export type StockStatus = 'In Stock' | 'Low Stock' | 'Out of Stock'
 
@@ -33,13 +38,43 @@ export interface Product {
   expiry_date: string
   unit_cost: number
   selling_price: number
+  /** ISO code (e.g. 'USD') the prices are in; null/absent = home currency. */
+  currency?: string | null
   reorder_level: number
   stock_quantity: number
   supplier_id: string
   supplier?: Supplier
   image_url?: string
+  /** Legacy external inventory id (unused in I-BG). */
+  shopify_inventory_item_id?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface StockLocation {
+  id: string
+  name: string
+  /** Numeric Shopify location id; null = IMS-only location. */
+  shopify_location_id: string | null
+  sort_order: number
+}
+
+/** Per-location quantity. Only "located" products (synced with Shopify) have these rows. */
+/** Part of a product's stock with its own batch number + expiry (2026-10-08 migration).
+ *  Batches hold up to stock_quantity units; the rest has no expiry recorded. */
+export interface ProductBatch {
+  id: string
+  product_id: string
+  batch_number: string
+  expiry_date: string | null
+  quantity: number
+  created_at: string
+}
+
+export interface ProductStock {
+  product_id: string
+  location_id: string
+  quantity: number
 }
 
 export type TransactionType =
@@ -67,6 +102,12 @@ export interface Transaction {
   unit_cost?: number | null
   /** Same snapshotting as unit_cost, for selling_price. */
   selling_price?: number | null
+  location_id?: string | null
+  /** Signed stock change (null on rows from before 2026-10-05). */
+  stock_delta?: number | null
+  source?: 'ims' | 'shopify'
+  shopify_synced_at?: string | null
+  shopify_error?: string | null
   created_at: string
 }
 
@@ -122,9 +163,11 @@ export function getStockStatus(product: Product): StockStatus {
   return 'In Stock'
 }
 
-export function getExpiryStatus(expiryDate: string): ExpiryStatus {
+export function getExpiryStatus(expiryDate: string | null | undefined): ExpiryStatus {
   const today = new Date()
-  const expiry = new Date(expiryDate)
+  const expiry = new Date(expiryDate ?? '')
+  // No / unparseable expiry date = doesn't expire (new Date(null) is 1970 → "expired").
+  if (!expiryDate || Number.isNaN(expiry.getTime())) return 'safe'
   const daysUntilExpiry = Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
   if (daysUntilExpiry < 0) return 'expired'
   if (daysUntilExpiry < 14) return 'critical'

@@ -10,6 +10,7 @@ import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, ResponsiveCo
 import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, daysUntil } from '@/lib/utils'
+import { useFxRates, productInBase, txInBase } from '@/lib/currency'
 import { createClient } from '@/lib/supabase/client'
 import { syncStockAndExpiryAlerts } from '@/lib/generate-alerts'
 
@@ -18,15 +19,16 @@ const supabaseConfigured = (() => {
   return url.length > 0 && !url.includes('your-project-ref')
 })()
 
-const CATEGORY_PALETTE = ['#2FA6B8', '#38BDF8', '#6366F1', '#7C3AED', '#F59E0B', '#22C55E']
-const categoryColor = (index: number) => CATEGORY_PALETTE[index % CATEGORY_PALETTE.length]
+const CATEGORY_COLORS: Record<string, string> = { General: '#2FA6B8', Uncategorized: '#94A3B8' }
+const CATEGORY_PALETTE = ['#0EA5E9', '#22C55E', '#EC4899', '#6366F1', '#F59E0B', '#14B8A6']
+const categoryColor = (name: string, index: number) => CATEGORY_COLORS[name] ?? CATEGORY_PALETTE[index % CATEGORY_PALETTE.length]
 const STATUS_COLORS = { 'In Stock': '#22C55E', 'Low Stock': '#F59E0B', 'Out of Stock': '#EF4444' }
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [rawProducts, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
   const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions.slice(0, 6))
-  const [outboundTx, setOutboundTx] = useState<Pick<Transaction, 'product_id' | 'quantity' | 'unit_cost' | 'selling_price'>[]>(
+  const [rawOutboundTx, setOutboundTx] = useState<Pick<Transaction, 'product_id' | 'quantity' | 'unit_cost' | 'selling_price'>[]>(
     supabaseConfigured ? [] : mockTransactions.filter(t => t.type === 'outbound')
   )
 
@@ -54,6 +56,15 @@ export default function DashboardPage() {
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Products can be priced in different currencies; all totals are in the
+  // home currency (Settings → Currency) at today's rates.
+  const fx = useFxRates()
+  const products = useMemo(() => rawProducts.map(p => productInBase(p, fx)), [rawProducts, fx])
+  const outboundTx = useMemo(() => {
+    const rawById = new Map(rawProducts.map(p => [p.id, p]))
+    return rawOutboundTx.map(tx => txInBase(tx, rawById.get(tx.product_id), fx))
+  }, [rawOutboundTx, rawProducts, fx])
 
   const kpis = useMemo(() => {
     const totalSKUs = products.length
@@ -141,7 +152,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
         {[
           {
             icon: Package, label: 'Total SKUs', value: kpis.totalSKUs,
@@ -182,9 +193,9 @@ export default function DashboardPage() {
               {value}
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{label}</div>
-            <div style={{ fontSize: 12, color: '#94A3B8' }}>{sub}</div>
+            <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 12 }}>{sub}</div>
             <div style={{
-              marginTop: 12, paddingTop: 12,
+              marginTop: 'auto', paddingTop: 12,
               borderTop: '1px solid #F1F5F9',
               fontSize: 12, color, fontWeight: 600,
             }}>{trend}</div>
@@ -193,7 +204,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
         {/* Donut chart */}
         <div className="card" style={{ padding: 24 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Category Distribution</h3>
@@ -203,17 +214,17 @@ export default function DashboardPage() {
               <PieChart>
                 <Pie data={categoryData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
                   {categoryData.map(({ name }, i) => (
-                    <Cell key={name} fill={categoryColor(i)} />
+                    <Cell key={name} fill={categoryColor(name, i)} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(v) => [`${v} products`, '']} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', justifyContent: 'center', marginTop: 8 }}>
             {categoryData.map(({ name, value }, i) => (
               <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: categoryColor(i) }} />
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: categoryColor(name, i) }} />
                 <span style={{ fontSize: 12, color: '#475569', fontWeight: 500 }}>{name} ({value})</span>
               </div>
             ))}
@@ -242,7 +253,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Bottom row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
         {/* Low Stock Alerts */}
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -250,6 +261,8 @@ export default function DashboardPage() {
             <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/alerts')}>View all →</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {lowStockProducts.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: '10px 2px' }}>All products are stocked.</div>}
+            {lowStockProducts.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: '10px 2px' }}>All products are stocked.</div>}
             {lowStockProducts.map(p => {
               const status = getStockStatus(p)
               return (
@@ -258,7 +271,7 @@ export default function DashboardPage() {
                   padding: '10px 12px', borderRadius: 10, background: '#F8FAFC',
                   border: '1px solid #F1F5F9',
                 }}>
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                     <div style={{ fontSize: 11, color: '#94A3B8' }}>{p.sku}</div>
                   </div>
@@ -283,12 +296,14 @@ export default function DashboardPage() {
             <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/stock-movements')}>View all →</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {recentTx.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: '10px 2px' }}>No transactions yet.</div>}
+            {recentTx.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: '10px 2px' }}>No transactions yet.</div>}
             {recentTx.map(tx => (
               <div key={tx.id} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                 padding: '10px 12px', borderRadius: 10, background: '#F8FAFC', border: '1px solid #F1F5F9',
               }}>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {tx.product?.name ?? tx.sku}
                   </div>
@@ -312,19 +327,20 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Expiring Soon */}
+        {/* Expiring & Expired */}
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Expiring Soon</h3>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Expiring &amp; Expired</h3>
             <span style={{ fontSize: 12, color: '#2FA6B8', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/alerts?type=expiring_product')}>View all →</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {expiringProducts.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: '10px 2px' }}>Nothing expiring soon.</div>}
             {expiringProducts.map(p => (
               <div key={p.id} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                 padding: '10px 12px', borderRadius: 10, background: '#F8FAFC', border: '1px solid #F1F5F9',
               }}>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
                   </div>

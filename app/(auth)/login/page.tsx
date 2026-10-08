@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Image from 'next/image'
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { Manrope } from 'next/font/google'
+
+const manrope = Manrope({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], variable: '--ib-font' })
 
 function isSupabaseConfigured() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -13,6 +13,7 @@ function isSupabaseConfigured() {
 
 const MAX_ATTEMPTS = 5
 const LOCKOUT_MS = 15 * 60 * 1000
+
 function getAttempts(): { count: number; lockedUntil: number } {
   try {
     const d = sessionStorage.getItem('_lka')
@@ -31,6 +32,76 @@ function minutesLocked(): number {
   return (a.lockedUntil && Date.now() < a.lockedUntil) ? Math.ceil((a.lockedUntil - Date.now()) / 60000) : 0
 }
 
+// Ported from the provided "ibg-ultra-premium" design (index.html), scoped under ib-.
+// Manrope is self-hosted via next/font (no runtime call to Google Fonts).
+const LOGIN_CSS = `
+.ib-layout{min-height:100svh;display:grid;grid-template-columns:minmax(0,1.62fr) minmax(380px,.88fr);font-family:var(--ib-font),Manrope,Inter,system-ui,Arial,sans-serif;background:#06111c;color:#fff;width:100%}
+.ib-layout *{box-sizing:border-box}
+.ib-layout button,.ib-layout input{font:inherit}
+.ib-layout button{cursor:pointer}
+.ib-layout button:focus-visible,.ib-layout input:focus-visible{outline:3px solid #67dfe8;outline-offset:3px}
+.ib-hero{position:relative;isolation:isolate;overflow:hidden;min-height:820px;padding:clamp(35px,5vw,78px);display:flex;flex-direction:column;justify-content:space-between;background:radial-gradient(ellipse at 83% 50%,#0d3e4b 0%,#0b2232 38%,#06101b 76%)}
+.ib-hero:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(90deg,#06101b 2%,rgba(6,16,27,.91) 42%,rgba(6,16,27,.15) 100%),url('/login-warehouse.jpg') center right/cover no-repeat;opacity:.7}
+.ib-hero:after{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(circle at 80% 60%,transparent 8%,rgba(3,13,24,.55) 72%);pointer-events:none}
+.ib-mesh{position:absolute;inset:0;opacity:.13;background-image:linear-gradient(#4de4ec22 1px,transparent 1px),linear-gradient(90deg,#4de4ec22 1px,transparent 1px);background-size:58px 58px;-webkit-mask-image:linear-gradient(90deg,transparent,#000);mask-image:linear-gradient(90deg,transparent,#000);pointer-events:none}
+.ib-orb{position:absolute;width:440px;height:440px;right:-120px;top:18%;border-radius:50%;background:#20c8e4;filter:blur(140px);opacity:.12;animation:ibBreathe 7s ease-in-out infinite alternate}
+.ib-brand{display:flex;align-items:center;gap:15px;position:relative;z-index:2}
+.ib-logo{width:96px;height:96px;object-fit:contain;filter:brightness(0) invert(1)}
+.ib-brand-label{font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:#b3cbd6;line-height:1.8}
+.ib-content{position:relative;z-index:2;max-width:620px;padding:65px 0 45px}
+.ib-eyebrow{display:inline-flex;align-items:center;gap:10px;border:1px solid #54dbe744;border-radius:100px;padding:9px 15px;color:#b9edf0;font-size:10px;letter-spacing:.19em;font-weight:700}
+.ib-dot{width:6px;height:6px;background:#38d5e4;border-radius:50%;box-shadow:0 0 14px #36dce8}
+.ib-hero h1{font-size:clamp(46px,4.5vw,78px);line-height:1.08;letter-spacing:-.065em;margin:27px 0 24px;font-weight:800;color:#fff}
+.ib-hero h1 span{display:block;color:#3bd2e2}
+.ib-desc{max-width:450px;color:#b0c2d0;font-size:15px;line-height:1.85;margin:0 0 42px}
+.ib-features{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;max-width:630px}
+.ib-feature{padding:21px 17px;border:1px solid #8eeaf124;border-radius:16px;background:linear-gradient(140deg,#18374891,#071724a8);backdrop-filter:blur(16px);transition:transform .3s,border-color .3s}
+.ib-feature:hover{transform:translateY(-6px);border-color:#6adfea88}
+.ib-feature svg{width:24px;height:24px;color:#48d6e3;margin-bottom:16px}
+.ib-feature b{display:block;font-size:12px;margin-bottom:7px}
+.ib-feature small{font-size:10px;color:#91aaba;line-height:1.6;display:block}
+.ib-footer{color:#7996a7;font-size:11px;position:relative;z-index:2}
+.ib-analytics{position:absolute;right:3.5%;top:20%;width:220px;display:grid;gap:13px;z-index:1;pointer-events:none}
+.ib-stat{background:linear-gradient(130deg,#0b2a3ecb,#061a29cf);border:1px solid #71e3ec44;box-shadow:0 20px 65px #0005,inset 0 1px #ffffff15;backdrop-filter:blur(18px);border-radius:16px;padding:17px 20px;animation:ibFloat 6s ease-in-out infinite}
+.ib-stat:nth-child(2){animation-delay:-2s}
+.ib-stat:nth-child(3){animation-delay:-4s}
+.ib-stat .ib-label{font-size:11px;color:#a8cad6}
+.ib-stat strong{font-size:29px;letter-spacing:-.04em;display:block;margin:5px 0}
+.ib-stat small{font-size:10px;color:#87a4b3}
+.ib-stat strong em{font-style:normal;color:#43d7e6}
+.ib-line{height:4px;background:#174451;border-radius:4px;overflow:hidden;margin-top:13px}
+.ib-line i{display:block;background:linear-gradient(90deg,#0d9ba9,#5af1f5);height:100%;width:98%;border-radius:4px;animation:ibGrow 2s ease-out}
+.ib-login-side{position:relative;background:linear-gradient(145deg,#eaf4f8,#f9fcfe 60%,#e5f2f7);color:#122030;display:flex;align-items:center;justify-content:center;padding:60px 34px;overflow:hidden}
+.ib-login-side:before{content:"";position:absolute;width:700px;height:700px;border:1px solid #bbd9e4;border-radius:100px;transform:rotate(34deg);top:-530px;right:-300px}
+.ib-panel{position:relative;width:100%;max-width:440px;background:#ffffffed;border:1px solid #fff;box-shadow:0 30px 90px #173d501e,0 3px 15px #183e4b0b;border-radius:27px;padding:clamp(27px,3.2vw,48px);animation:ibArrive .9s both}
+.ib-panel-logo{display:block;width:122px;height:122px;object-fit:contain;margin:0 auto 12px}
+.ib-panel h2{font-size:32px;letter-spacing:-.05em;margin:15px 0 7px;font-weight:800;color:#122030}
+.ib-sub{font-size:12px;color:#718399;line-height:1.7;margin:0 0 29px}
+.ib-field-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 9px}
+.ib-field-head label{font-size:12px;font-weight:700}
+.ib-forgot{border:0;background:none;color:#078fa2;font-size:11px;padding:0}
+.ib-field{position:relative;margin-bottom:23px}
+.ib-field input{width:100%;height:51px;border:1px solid #dce5ec;border-radius:11px;background:#f9fcfe;padding:0 64px 0 15px;font-size:13px;color:#122030;transition:border-color .2s,box-shadow .2s}
+.ib-field input:focus{border-color:#23b9c9;box-shadow:0 0 0 4px #25c6d514;outline:none}
+.ib-eye{position:absolute;right:10px;top:8px;border:0;background:transparent;color:#6d8799;padding:9px;font-size:12px}
+.ib-submit{width:100%;height:52px;border:0;border-radius:11px;background:linear-gradient(110deg,#075f70,#0ca6b5 55%,#38d6dc);color:#fff;font-weight:800;font-size:13px;box-shadow:0 9px 20px #0ba4b22d;transition:transform .2s,box-shadow .2s}
+.ib-submit:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 12px 27px #0ba4b24d}
+.ib-submit:disabled{opacity:.65;cursor:not-allowed}
+.ib-ghost{width:100%;margin-top:12px;border:0;background:none;color:#078fa2;font-size:12px;font-weight:700;padding:6px}
+.ib-status{min-height:20px;color:#a24a32;font-size:11px;margin-top:12px}
+.ib-success{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:11px;padding:14px;font-size:12px;line-height:1.6;margin-bottom:16px}
+.ib-demo{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 12px;font-size:11px;margin-top:16px;text-align:center}
+.ib-note{font-size:10px;color:#91a3b4;text-align:center;margin-top:24px}
+@keyframes ibFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+@keyframes ibBreathe{to{opacity:.23;transform:scale(1.2)}}
+@keyframes ibGrow{from{width:0}}
+@keyframes ibArrive{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:1160px){.ib-analytics{opacity:.65;right:1%;width:175px}.ib-content{max-width:480px}.ib-hero h1{font-size:55px}}
+@media(max-width:880px){.ib-layout{grid-template-columns:1fr}.ib-hero{min-height:650px;padding:35px}.ib-content{padding:65px 0}.ib-analytics{right:4%;top:22%}.ib-login-side{padding:70px 22px}.ib-panel{max-width:490px}.ib-hero .ib-features{max-width:550px}}
+@media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo{width:70px;height:70px}.ib-brand-label{font-size:9px}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
+@media(prefers-reduced-motion:reduce){.ib-layout *,.ib-layout *:before,.ib-layout *:after{animation:none!important;transition:none!important}}
+`
+
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
@@ -39,29 +110,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [lockedFor, setLockedFor] = useState(0)
+  const [forgotMode, setForgotMode] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
   const mockMode = !isSupabaseConfigured()
 
   useEffect(() => {
-    const mins = minutesLocked()
-    if (mins > 0) {
-      setLockedFor(mins)
-      const t = setInterval(() => {
-        const m = minutesLocked()
-        setLockedFor(m)
-        if (m === 0) clearInterval(t)
-      }, 30000)
-      return () => clearInterval(t)
-    }
+    setLockedFor(minutesLocked())
   }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
 
-    const locked = minutesLocked()
-    if (locked > 0) {
-      setLockedFor(locked)
-      setError(`Too many failed attempts. Try again in ${locked} minute${locked > 1 ? 's' : ''}.`)
+    const mins = minutesLocked()
+    if (mins > 0) {
+      setLockedFor(mins)
+      setError(`Too many failed attempts. Try again in ${mins} minute${mins !== 1 ? 's' : ''}.`)
       return
     }
 
@@ -74,15 +138,12 @@ export default function LoginPage() {
     }
 
     try {
+      const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
-      // Defensive: clear any stale local session before signing in, so a leftover
-      // invalid refresh-token cookie from a previous session can't interfere. (The
-      // actual Safari "stuck signing in" bug was the Partitioned cookie attribute
-      // never persisting on direct visits — see lib/supabase/config.ts — but this
-      // is still good hygiene.)
+      // Clear any stale local session first so a leftover invalid refresh-token
+      // cookie can't interfere with the new sign-in.
       await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
-      // Never let the button hang forever — surface a real error instead of an
-      // infinite "Signing in..." spinner if the network call stalls.
+      // Never let the button hang forever on a stalled network call.
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('TIMEOUT')), 15000)
       )
@@ -92,14 +153,17 @@ export default function LoginPage() {
       ])
       if (authError) {
         recordFail()
-        const mins = minutesLocked()
-        if (mins > 0) {
-          setLockedFor(mins)
-          setError(`Too many failed attempts. Try again in ${mins} minute${mins > 1 ? 's' : ''}.`)
+        const remaining = MAX_ATTEMPTS - getAttempts().count
+        const locked = minutesLocked()
+        if (locked > 0) {
+          setLockedFor(locked)
+          setError(`Too many failed attempts. Try again in ${locked} minute${locked !== 1 ? 's' : ''}.`)
         } else {
-          setError(authError.message === 'Invalid login credentials'
-            ? 'Incorrect email or password. Please try again.'
-            : authError.message)
+          setError(
+            authError.message === 'Invalid login credentials'
+              ? `Incorrect email or password. ${remaining > 0 ? `${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.` : ''}`
+              : authError.message
+          )
         }
         setLoading(false)
       } else {
@@ -119,171 +183,138 @@ export default function LoginPage() {
     }
   }
 
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    if (mockMode) {
+      await new Promise(r => setTimeout(r, 600))
+      setResetSent(true)
+      setLoading(false)
+      return
+    }
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      })
+      // Supabase returns success for unknown emails too; only surface
+      // real failures (e.g. rate limits) so the form can't be used to
+      // probe which addresses have accounts.
+      if (resetError) setError(resetError.message)
+      else setResetSent(true)
+    } catch {
+      setError('Something went wrong. Please try again.')
+    }
+    setLoading(false)
+  }
+
+  function switchMode(forgot: boolean) {
+    setForgotMode(forgot)
+    setResetSent(false)
+    setError('')
+  }
+
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex',
-      background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F2A3A 100%)',
-    }}>
-      {/* Left panel */}
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        padding: 48, color: 'white',
-      }}>
-        <div style={{ maxWidth: 440 }}>
-          <div style={{ marginBottom: 48 }}>
-            <Image
-              src="/company-logo.png"
-              alt="I-BG CT Asia"
-              width={200}
-              height={104}
-              style={{ width: 200, height: 'auto' }}
-              priority
-            />
-            <div style={{ color: '#64748B', fontSize: 11, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 8 }}>
-              Inventory Management System
+    <main className={`ib-layout ${manrope.variable}`}>
+      <style>{LOGIN_CSS}</style>
+      <section className="ib-hero">
+        <div className="ib-mesh" />
+        <div className="ib-orb" />
+        <header className="ib-brand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="ib-logo" src="/ibg-mark.png" alt="I-BG CT Asia logo" />
+          <div className="ib-brand-label">I-BG CT ASIA<br />Inventory Management System</div>
+        </header>
+        <div className="ib-analytics" aria-hidden="true">
+          <div className="ib-stat"><div className="ib-label">◈ Inventory health</div><strong><em>98%</em></strong><small>Illustrative dashboard preview</small><div className="ib-line"><i /></div></div>
+          <div className="ib-stat"><div className="ib-label">△ Low stock items</div><strong>03 <small>items</small></strong><small>Inventory visibility</small></div>
+          <div className="ib-stat"><div className="ib-label">▦ Expiry alerts</div><strong>12 <small>items</small></strong><small>Proactive monitoring</small></div>
+        </div>
+        <div className="ib-content">
+          <div className="ib-eyebrow"><span className="ib-dot" /> INTELLIGENT INVENTORY CONTROL</div>
+          <h1>Smarter<br />Inventory.<span>Stronger<br />Operations.</span></h1>
+          <p className="ib-desc">One secure command center for inventory, purchase orders, suppliers and stock performance — designed for clarity, control and confidence.</p>
+          <div className="ib-features">
+            <div className="ib-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 2 9 5-9 5-9-5 9-5Zm-9 5v10l9 5 9-5V7M12 12v10" /></svg>
+              <b>Stock Tracking</b><small>Clear visibility across every product</small>
+            </div>
+            <div className="ib-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M8 7h8M8 11h8M8 15h5" /></svg>
+              <b>Purchase Orders</b><small>Suppliers and restocking, simplified</small>
+            </div>
+            <div className="ib-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 20h18M6 17v-5h3v5M11 17V7h3v10M16 17V3h3v14" /></svg>
+              <b>Real-time Insights</b><small>Performance, stock and expiry trends</small>
             </div>
           </div>
+        </div>
+        <footer className="ib-footer">© {new Date().getFullYear()} I-BG CT Asia Pte. Ltd. · Internal use only</footer>
+      </section>
 
-          <h1 style={{ fontSize: 36, fontWeight: 800, lineHeight: 1.15, marginBottom: 16, letterSpacing: '-0.02em' }}>
-            Internal<br />
-            <span style={{ background: 'linear-gradient(90deg, #2FA6B8, #38BDF8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              Access Portal
-            </span>
-          </h1>
-          <p style={{ color: '#94A3B8', fontSize: 15, lineHeight: 1.6 }}>
-            Secure access for authorized I-BG CT Asia personnel only.
+      <section className="ib-login-side">
+        <div className="ib-panel">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/ibg-mark.png" alt="I-BG CT Asia logo" className="ib-panel-logo" />
+          <h2>{forgotMode ? 'Reset password.' : 'Welcome back.'}</h2>
+          <p className="ib-sub">
+            {forgotMode
+              ? 'Enter your company email and we\'ll send you a link to set a new password.'
+              : 'Sign in with your company credentials to access the I-BG CT Asia Inventory Management System.'}
           </p>
 
-          <div style={{ marginTop: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {[
-              { icon: '📦', title: 'Stock Tracking', desc: 'Live inventory levels across all products' },
-              { icon: '🧾', title: 'Purchase Orders', desc: 'Manage suppliers and restocking' },
-              { icon: '📊', title: 'Real-time Analytics', desc: 'Stock levels, expiry tracking' },
-            ].map(({ icon, title, desc }) => (
-              <div key={title} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: 'rgba(47,166,184,0.12)',
-                  border: '1px solid rgba(47,166,184,0.2)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 18, flexShrink: 0,
-                }}>{icon}</div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
-                  <div style={{ color: '#64748B', fontSize: 13 }}>{desc}</div>
+          {forgotMode ? (
+            resetSent ? (
+              <>
+                <div className="ib-success">
+                  If an account exists for <strong>{email.trim()}</strong>, a password reset link is on its way.
+                  Check your inbox (and spam folder). The link expires in 1 hour.
                 </div>
+                <button type="button" className="ib-submit" onClick={() => switchMode(false)}>Back to sign in</button>
+              </>
+            ) : (
+              <form method="post" onSubmit={handleForgot}>
+                <div className="ib-field-head"><label htmlFor="email">Email address</label></div>
+                <div className="ib-field">
+                  <input id="email" type="email" autoComplete="username" placeholder="you@ibgctasia.com" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+                </div>
+                <button type="submit" className="ib-submit" disabled={loading}>{loading ? 'Sending…' : 'Send reset link →'}</button>
+                <button type="button" className="ib-ghost" onClick={() => switchMode(false)}>← Back to sign in</button>
+                <div className="ib-status" role="status" aria-live="polite">{error}</div>
+              </form>
+            )
+          ) : (
+            <form method="post" onSubmit={handleLogin}>
+              <div className="ib-field-head"><label htmlFor="email">Email address</label></div>
+              <div className="ib-field">
+                <input id="email" type="email" autoComplete="username" placeholder="you@ibgctasia.com" value={email} onChange={e => setEmail(e.target.value)} required />
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Right panel — form */}
-      <div style={{
-        width: 460, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 40, background: 'white',
-      }}>
-        <div style={{ width: '100%', maxWidth: 380 }}>
-          <div style={{ marginBottom: 32 }}>
-            <Image
-              src="/company-logo.png"
-              alt="I-BG CT Asia"
-              width={140}
-              height={73}
-              style={{ width: 140, height: 'auto', marginBottom: 20 }}
-              priority
-            />
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>Sign in</h2>
-            <p style={{ color: '#64748B', fontSize: 14 }}>Use your I-BG CT Asia email and password.</p>
-          </div>
-
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                Email address
-              </label>
-              <div style={{ position: 'relative' }}>
-                <Mail size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
-                <input
-                  type="email"
-                  className="input-field"
-                  style={{ paddingLeft: 36 }}
-                  placeholder="you@ibgctasia.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                />
+              <div className="ib-field-head">
+                <label htmlFor="password">Password</label>
+                <button type="button" className="ib-forgot" onClick={() => switchMode(true)}>Forgot password?</button>
               </div>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                Password
-              </label>
-              <div style={{ position: 'relative' }}>
-                <Lock size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  className="input-field"
-                  style={{ paddingLeft: 36, paddingRight: 40 }}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                    background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 0,
-                  }}
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              <div className="ib-field">
+                <input id="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)} required />
+                <button className="ib-eye" type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                  {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
-            </div>
-
-            {error && (
-              <div style={{
-                background: '#FEE2E2', border: '1px solid #FECACA',
-                borderRadius: 10, padding: '10px 14px',
-                fontSize: 13, color: '#991B1B',
-              }}>
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || lockedFor > 0}
-              className="btn-primary"
-              style={{ justifyContent: 'center', padding: '12px 18px', fontSize: 15, opacity: (loading || lockedFor > 0) ? 0.7 : 1 }}
-            >
-              {loading ? 'Signing in...' : lockedFor > 0 ? `Locked — try in ${lockedFor}m` : 'Sign in to I-BG CT Asia IMS'}
-            </button>
-          </form>
-
-          {mockMode && (
-          <div style={{
-            marginTop: 32, padding: 16,
-            background: '#F8FAFC', borderRadius: 10,
-            border: '1px solid #E2E8F0',
-          }}>
-            <p style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>
-              Demo mode — Supabase not connected. Any credentials work.
-            </p>
-          </div>
+              <button className="ib-submit" type="submit" disabled={loading || lockedFor > 0}>
+                {loading ? 'Signing in…' : lockedFor > 0 ? `Locked — try in ${lockedFor}m` : 'Sign in securely →'}
+              </button>
+              <div className="ib-status" role="status" aria-live="polite">{error}</div>
+            </form>
           )}
 
-          <div style={{ marginTop: 24, textAlign: 'center' }}>
-            <p style={{ fontSize: 12, color: '#94A3B8' }}>
-              Internal system — unauthorized access is prohibited.
-            </p>
-          </div>
+          {mockMode && (
+            <div className="ib-demo">Demo mode — Supabase not connected. Any credentials work.</div>
+          )}
+
+          <div className="ib-note">♧ Secure portal · Authorized personnel only</div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   )
 }

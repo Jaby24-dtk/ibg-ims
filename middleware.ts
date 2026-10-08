@@ -98,7 +98,7 @@ export function middleware(request: NextRequest) {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://*.supabase.co",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "font-src 'self' data: https://fonts.gstatic.com",
     "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -123,7 +123,11 @@ export function middleware(request: NextRequest) {
   // must be reachable before a session cookie exists.
   const isSsoBridge = pathname === '/sso'
 
-  if (!authed && !isLoginPage && !isRoot && !isSsoBridge) {
+  // The password-reset link arrives unauthenticated (the session is created
+  // client-side from the one-time code in the URL), and a signed-in user
+  // must be able to stay here to set the new password.
+  const isPasswordReset = pathname === '/reset-password'
+  if (!authed && !isLoginPage && !isRoot && !isSsoBridge && !isPasswordReset) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     const redirectRes = NextResponse.redirect(url)

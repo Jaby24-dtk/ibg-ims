@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Bell, AlertTriangle, Package, Clock, ShoppingCart, SlidersHorizontal, CheckCircle, X, Trash2 } from 'lucide-react'
+import { Bell, AlertTriangle, Package, Clock, ShoppingCart, SlidersHorizontal, CheckCircle, X, Trash2, XCircle } from 'lucide-react'
 import { mockAlerts } from '@/lib/mock-data'
 import { formatDateTime } from '@/lib/utils'
 import type { Alert, AlertType } from '@/types'
 import { createClient } from '@/lib/supabase/client'
+import { isExpiredAlertMessage } from '@/lib/generate-alerts'
 
 const supabaseConfigured = (() => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -15,8 +16,8 @@ const supabaseConfigured = (() => {
 const alertConfig: Record<AlertType, { label: string; icon: React.ElementType; badge: string; color: string }> = {
   low_stock:               { label: 'Low Stock',               icon: AlertTriangle, badge: 'badge-warning', color: '#F59E0B' },
   out_of_stock:            { label: 'Out of Stock',            icon: Package,       badge: 'badge-danger',  color: '#EF4444' },
-  expiring_product:        { label: 'Expiring Product',        icon: Clock,         badge: 'badge-danger',  color: '#EF4444' },
-  new_purchase_order:      { label: 'New Purchase Order',      icon: ShoppingCart,  badge: 'badge-info',    color: '#38BDF8' },
+  expiring_product:        { label: 'Expiring / Expired',      icon: Clock,         badge: 'badge-danger',  color: '#EF4444' },
+  new_purchase_order:      { label: 'New Purchase Order',      icon: ShoppingCart,  badge: 'badge-info',    color: '#0EA5E9' },
   inventory_discrepancy:   { label: 'Inventory Discrepancy',   icon: SlidersHorizontal, badge: 'badge-purple', color: '#7C3AED' },
 }
 
@@ -163,7 +164,12 @@ export default function AlertsPage() {
           </div>
         )}
         {filtered.map(alert => {
-          const cfg = alertConfig[alert.type]
+          const expired = alert.type === 'expiring_product' && isExpiredAlertMessage(alert.message)
+          const cfg = alert.type === 'expiring_product'
+            ? (expired
+                ? { ...alertConfig.expiring_product, label: 'Expired', icon: XCircle, color: '#B91C1C' }
+                : { ...alertConfig.expiring_product, label: 'Expiring Soon', badge: 'badge-warning', color: '#F59E0B' })
+            : alertConfig[alert.type]
           const Icon = cfg.icon
           const isUnread = alert.status === 'unread'
           return (

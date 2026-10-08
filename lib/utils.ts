@@ -8,7 +8,7 @@ let _currencySymbol: string | null = null
 
 export function formatCurrency(amount: number): string {
   if (_currencySymbol === null) {
-    _currencySymbol = '₱'
+    _currencySymbol = 'S$'
     if (typeof window !== 'undefined') {
       try {
         const s = JSON.parse(localStorage.getItem('ibg_settings') ?? '{}')
@@ -17,7 +17,8 @@ export function formatCurrency(amount: number): string {
       } catch { /* use default */ }
     }
   }
-  return _currencySymbol + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return (amount < 0 ? '-' : '') + _currencySymbol + abs
 }
 
 export function formatDate(dateStr: string): string {

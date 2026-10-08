@@ -58,7 +58,7 @@ export async function syncStockAndExpiryAlerts(sb: SupabaseClient, products: Pro
 
   const { data: existing, error: fetchError } = await sb
     .from('alerts')
-    .select('type, product_id')
+    .select('type, product_id, message')
     .in('type', ['low_stock', 'out_of_stock', 'expiring_product'])
 
   if (fetchError) { console.error('Failed to check existing alerts:', fetchError); return }
@@ -66,12 +66,15 @@ export async function syncStockAndExpiryAlerts(sb: SupabaseClient, products: Pro
   const stockCovered = new Set(
     (existing ?? []).filter(a => a.type === 'low_stock' || a.type === 'out_of_stock').map(a => a.product_id)
   )
+  // Expiry alerts are deduped per product *and* stage: an earlier "expires
+  // soon" alert must not suppress the "has expired" one once the date passes.
+  const expiryKey = (productId: string, message: string) => `${productId}|${isExpiredAlertMessage(message) ? 'expired' : 'soon'}`
   const expiryCovered = new Set(
-    (existing ?? []).filter(a => a.type === 'expiring_product').map(a => a.product_id)
+    (existing ?? []).filter(a => a.type === 'expiring_product').map(a => expiryKey(a.product_id, a.message ?? ''))
   )
 
   const toInsert = needed.filter(n =>
-    n.type === 'expiring_product' ? !expiryCovered.has(n.product_id) : !stockCovered.has(n.product_id)
+    n.type === 'expiring_product' ? !expiryCovered.has(expiryKey(n.product_id, n.message)) : !stockCovered.has(n.product_id)
   )
 
   if (toInsert.length === 0) return
@@ -80,4 +83,48 @@ export async function syncStockAndExpiryAlerts(sb: SupabaseClient, products: Pro
     toInsert.map(n => ({ type: n.type, product_id: n.product_id, message: n.message, status: 'unread' as const }))
   )
   if (insertError) console.error('Failed to create alerts:', insertError)
+}
+
+// Raise a low_stock alert for products the reorder-timing logic flags as
+// "reorder now" — i.e. days-of-stock-left has dropped to within the supplier's
+// lead time, even if the manual reorder level hasn't been hit yet. Deduped the
+// same way as syncStockAndExpiryAlerts: any existing low/out alert for that
+// product blocks a new one, so this never double-posts with the threshold check.
+export async function syncReorderAlerts(
+  sb: SupabaseClient,
+  entries: { product: Product; daysLeft: number | null; leadTimeDays: number }[],
+) {
+  if (entries.length === 0) return
+
+  const ids = entries.map(e => e.product.id)
+  const { data: existing, error: fetchError } = await sb
+    .from('alerts')
+    .select('type, product_id')
+    .in('type', ['low_stock', 'out_of_stock'])
+    .in('product_id', ids)
+
+  if (fetchError) { console.error('Failed to check existing alerts:', fetchError); return }
+  const covered = new Set((existing ?? []).map(a => a.product_id))
+
+  const toInsert = entries
+    .filter(e => !covered.has(e.product.id))
+    .map(e => ({
+      type: 'low_stock' as const,
+      product_id: e.product.id,
+      status: 'unread' as const,
+      message:
+        `${e.product.name} needs reordering now` +
+        (e.daysLeft != null ? ` — about ${Math.max(0, Math.round(e.daysLeft))} day(s) of stock left` : '') +
+        (e.leadTimeDays > 0 ? `, supplier lead time ${e.leadTimeDays} day(s).` : '.'),
+    }))
+
+  if (toInsert.length === 0) return
+  const { error: insertError } = await sb.from('alerts').insert(toInsert)
+  if (insertError) console.error('Failed to create reorder alerts:', insertError)
+}
+
+/** expiring_product alerts cover both "expires soon" and "has expired"; the
+ *  stored type can't tell them apart, so the message does. */
+export function isExpiredAlertMessage(message: string): boolean {
+  return /has expired|\bexpired\b/i.test(message) && !/expires soon/i.test(message)
 }

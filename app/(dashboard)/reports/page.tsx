@@ -10,6 +10,10 @@ import { mockProducts, mockTransactions } from '@/lib/mock-data'
 import { useRole, canExport } from '@/lib/use-role'
 import { getStockStatus, getExpiryStatus, type Product, type Transaction } from '@/types'
 import { formatCurrency } from '@/lib/utils'
+import { useFxRates, productInBase, txInBase, formatMoney, productCurrency, getBaseCurrency } from '@/lib/currency'
+import { getCurrencySymbol, getSettings } from '@/lib/app-settings'
+import { buildInventoryReportHtml } from '@/lib/report-pdf'
+import { categoryBadgeClass } from '@/lib/categories'
 import { createClient } from '@/lib/supabase/client'
 
 const supabaseConfigured = (() => {
@@ -18,10 +22,11 @@ const supabaseConfigured = (() => {
 })()
 
 function formatAxisCurrency(v: number): string {
-  if (v === 0) return '₱0'
-  if (Math.abs(v) < 1000) return `₱${v.toFixed(0)}`
+  const sym = getCurrencySymbol()
+  if (v === 0) return `${sym}0`
+  if (Math.abs(v) < 1000) return `${sym}${v.toFixed(0)}`
   const k = v / 1000
-  return `₱${(Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1))}k`
+  return `${sym}${(Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1))}k`
 }
 
 function exportToCsv(filename: string, rows: string[][]): void {
@@ -37,8 +42,8 @@ const TX_COLORS = { inbound: '#22C55E', outbound: '#38BDF8', adjustment: '#F59E0
 
 export default function ReportsPage() {
   const role = useRole()
-  const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
-  const [transactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions)
+  const [rawProducts, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
+  const [rawTransactions, setTransactions] = useState<Transaction[]>(supabaseConfigured ? [] : mockTransactions)
 
   useEffect(() => {
     if (!supabaseConfigured) return
@@ -57,6 +62,16 @@ export default function ReportsPage() {
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Products can be priced in different currencies; values and profits are
+  // reported in the home currency (Settings → Currency) at today's rates.
+  const fx = useFxRates()
+  const rawById = useMemo(() => new Map(rawProducts.map(p => [p.id, p])), [rawProducts])
+  const products = useMemo(() => rawProducts.map(p => productInBase(p, fx)), [rawProducts, fx])
+  const transactions = useMemo(
+    () => rawTransactions.map(tx => txInBase(tx, rawById.get(tx.product_id), fx)),
+    [rawTransactions, rawById, fx],
+  )
 
   const stockStatus = useMemo(() => {
     const data = [
@@ -126,6 +141,56 @@ export default function ReportsPage() {
     return { actualRevenue: revenue, actualProfit: profit, unitsSold: units }
   }, [transactions, products])
 
+  function exportPdf() {
+    const settings = getSettings()
+    const base = getBaseCurrency()
+    const html = (autoPrint: boolean) => buildInventoryReportHtml({
+      companyName: settings.companyName,
+      location: settings.location,
+      baseCurrency: base,
+      logoUrl: `${window.location.origin}/company-logo.png`,
+      iconUrl: `${window.location.origin}/ibg-mark.png`,
+      kpis: [
+        { label: 'Total Inventory Value', value: formatCurrency(totalInventoryValue), sub: 'Cost of stock on hand' },
+        { label: 'Potential Profit', value: formatCurrency(totalPotentialProfit), sub: 'If all stock on hand sells' },
+        { label: 'Actual Revenue (Sold)', value: formatCurrency(actualRevenue), sub: `${unitsSold.toLocaleString()} units sold` },
+        { label: 'Actual Profit (Sold)', value: formatCurrency(actualProfit), sub: 'From completed sales' },
+        { label: 'Products In Stock', value: String(stockStatus[0].value), sub: 'In stock, no shortage' },
+        { label: 'Low / Out of Stock', value: String(stockStatus[1].value + stockStatus[2].value), sub: 'Products need attention' },
+      ],
+      stockStatus,
+      expiryRisk,
+      txVolume,
+      rows: [...products]
+        .sort((a, b) => (b.stock_quantity * b.unit_cost) - (a.stock_quantity * a.unit_cost))
+        .map(p => {
+          const raw = rawById.get(p.id) ?? p
+          return {
+            name: p.name, sku: p.sku, category: p.category ?? '', stock: p.stock_quantity,
+            currency: productCurrency(p), unitCost: raw.unit_cost, sellingPrice: raw.selling_price,
+            valueBase: p.stock_quantity * p.unit_cost,
+            profitBase: p.stock_quantity * (p.selling_price - p.unit_cost),
+            status: getStockStatus(p), expiry: p.expiry_date ?? '', expiryStatus: p.expiry_date ? getExpiryStatus(p.expiry_date) : '',
+          }
+        }),
+      autoPrint,
+    })
+    const w = window.open('', '_blank', 'width=1200,height=900')
+    if (w) {
+      w.document.open()
+      w.document.write(html(true))
+      w.document.close()
+      return
+    }
+    // Pop-up blocked — download the report as an .html file to open and print.
+    const url = URL.createObjectURL(new Blob([html(false)], { type: 'text/html' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ibg-inventory-report-${new Date().toISOString().slice(0, 10)}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -137,10 +202,11 @@ export default function ReportsPage() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-secondary btn-sm" onClick={() => {
               const rows = [
-                ['Product', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Selling Price', 'Total Value', 'Potential Profit', 'Status', 'Expiry Date'],
+                ['Product', 'SKU', 'Category', 'Brand', 'Stock', 'Currency', 'Unit Cost', 'Selling Price', `Total Value (${getBaseCurrency()})`, `Potential Profit (${getBaseCurrency()})`, 'Status', 'Expiry Date'],
                 ...products.map(p => [
                   p.name, p.sku, p.category, p.brand,
-                  String(p.stock_quantity), String(p.unit_cost), String(p.selling_price),
+                  String(p.stock_quantity), productCurrency(p),
+                  String(rawById.get(p.id)?.unit_cost ?? p.unit_cost), String(rawById.get(p.id)?.selling_price ?? p.selling_price),
                   String(p.stock_quantity * p.unit_cost),
                   String(p.stock_quantity * (p.selling_price - p.unit_cost)),
                   getStockStatus(p), p.expiry_date,
@@ -150,7 +216,7 @@ export default function ReportsPage() {
             }}>
               <Download size={14} /> Export CSV
             </button>
-            <button className="btn-secondary btn-sm" onClick={() => window.print()}>
+            <button className="btn-secondary btn-sm" onClick={exportPdf}>
               <FileText size={14} /> Export PDF
             </button>
           </div>
@@ -282,10 +348,11 @@ export default function ReportsPage() {
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Full Stock Report</h3>
           {canExport(role) && <button className="btn-secondary btn-sm" onClick={() => {
             const rows = [
-              ['Product', 'SKU', 'Category', 'Brand', 'Stock Qty', 'Unit Cost (PHP)', 'Selling Price (PHP)', 'Total Value (PHP)', 'Potential Profit (PHP)', 'Reorder Level', 'Expiry Date', 'Status'],
+              ['Product', 'SKU', 'Category', 'Brand', 'Stock Qty', 'Currency', 'Unit Cost', 'Selling Price', `Total Value (${getBaseCurrency()})`, `Potential Profit (${getBaseCurrency()})`, 'Reorder Level', 'Expiry Date', 'Status'],
               ...[...products].sort((a,b) => (b.stock_quantity*b.unit_cost)-(a.stock_quantity*a.unit_cost)).map(p => [
                 p.name, p.sku, p.category, p.brand,
-                String(p.stock_quantity), String(p.unit_cost), String(p.selling_price),
+                String(p.stock_quantity), productCurrency(p),
+                String(rawById.get(p.id)?.unit_cost ?? p.unit_cost), String(rawById.get(p.id)?.selling_price ?? p.selling_price),
                 String(p.stock_quantity * p.unit_cost),
                 String(p.stock_quantity * (p.selling_price - p.unit_cost)),
                 String(p.reorder_level), p.expiry_date, getStockStatus(p),
@@ -317,13 +384,14 @@ export default function ReportsPage() {
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 600, color: '#111827' }}>{p.name}</td>
                     <td style={{ padding: '11px 14px', fontFamily: 'monospace', fontSize: 12, color: '#475569' }}>{p.sku}</td>
                     <td style={{ padding: '11px 14px' }}>
-                      <span className="badge badge-info">{p.category}</span>
+                      <span className={`badge ${categoryBadgeClass(p.category)}`}>{p.category}</span>
                     </td>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 700, color: p.stock_quantity === 0 ? '#EF4444' : '#0F172A' }}>
                       {p.stock_quantity.toLocaleString()}
                     </td>
-                    <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatCurrency(p.unit_cost)}</td>
-                    <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatCurrency(p.selling_price)}</td>
+                    {/* Per-unit prices in the product's own currency; value/profit columns are home currency. */}
+                    <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatMoney(rawById.get(p.id)?.unit_cost ?? p.unit_cost, productCurrency(p))}</td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, color: '#374151' }}>{formatMoney(rawById.get(p.id)?.selling_price ?? p.selling_price, productCurrency(p))}</td>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
                       {formatCurrency(p.stock_quantity * p.unit_cost)}
                     </td>

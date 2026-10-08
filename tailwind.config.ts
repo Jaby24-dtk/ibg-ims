@@ -22,7 +22,7 @@ const config: Config = {
           light: '#4BC4D8',
         },
         cyan: {
-          accent: '#38BDF8',
+          accent: '#F59E0B',
         },
         brand: {
           bg: '#F8FAFC',

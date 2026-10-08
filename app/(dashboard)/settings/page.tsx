@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Settings, User, Bell, Database, Save, Plus, Trash2, X, Eye, EyeOff, RefreshCw, KeyRound } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
+import { Settings, User, Bell, Database, Save, Plus, Trash2, X, Eye, EyeOff, RefreshCw, KeyRound, Truck, Pencil, Tag, Mail, History } from 'lucide-react'
+import { formatDate, formatDateTime, generateId } from '@/lib/utils'
 import { getSettings, saveSettings, type AppSettings } from '@/lib/app-settings'
 import { useRole } from '@/lib/use-role'
+import DatabaseStatusPanel from '@/components/settings/DatabaseStatusPanel'
 
 type AppUser = { id: string; name: string; email: string; role: string; created_at: string }
 
@@ -18,9 +19,25 @@ const roleConfig: Record<string, { label: string; badge: string }> = {
 const tabs = [
   { id: 'general',    label: 'General',       icon: Settings },
   { id: 'users',      label: 'Users & Access', icon: User },
+  { id: 'suppliers',  label: 'Suppliers',    icon: Truck },
+  { id: 'categories', label: 'Categories',   icon: Tag },
   { id: 'alerts',     label: 'Alert Settings', icon: Bell },
+  { id: 'email-alerts', label: 'Email Alerts', icon: Mail },
+  { id: 'audit-log',  label: 'Audit Log',    icon: History },
   { id: 'database',   label: 'Database',      icon: Database },
 ]
+
+type SupplierRow = {
+  id: string
+  name: string
+  contact_person: string | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  country: string | null
+  lead_time_days: number | null
+  created_at?: string
+}
 
 export default function SettingsPage() {
   const role = useRole()
@@ -46,6 +63,29 @@ export default function SettingsPage() {
   const [resetError, setResetError] = useState('')
   const [resetSuccess, setResetSuccess] = useState('')
   const [resetting, setResetting] = useState(false)
+  const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false)
+  const [supplierModalMode, setSupplierModalMode] = useState<'add' | 'edit' | null>(null)
+  const [supplierEditId, setSupplierEditId] = useState<string | null>(null)
+  const [supplierForm, setSupplierForm] = useState({ name: '', contact_person: '', email: '', phone: '', address: '', country: '', lead_time_days: '' })
+  const [supplierError, setSupplierError] = useState('')
+  const [savingSupplier, setSavingSupplier] = useState(false)
+  const [deletingSupplierId, setDeletingSupplierId] = useState<string | null>(null)
+  const [recipients, setRecipients] = useState<{ id: string; email: string }[]>([])
+  const [loadingRecipients, setLoadingRecipients] = useState(false)
+  const [recipientInput, setRecipientInput] = useState('')
+  const [recipientError, setRecipientError] = useState('')
+  const [savingRecipient, setSavingRecipient] = useState(false)
+  const [deletingRecipientId, setDeletingRecipientId] = useState<string | null>(null)
+  type AuditRow = { id: string; actor_name: string | null; actor_email: string | null; action: string; entity_type: string; entity_label: string | null; created_at: string }
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [loadingAudit, setLoadingAudit] = useState(false)
+  const [categories, setCategories] = useState<{ id: string; name: string; created_at?: string }[]>([])
+  const [loadingCategories, setLoadingCategories] = useState(false)
+  const [newCategory, setNewCategory] = useState('')
+  const [categoryError, setCategoryError] = useState('')
+  const [addingCategory, setAddingCategory] = useState(false)
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null)
 
   const isConfigured = (() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -65,8 +105,236 @@ export default function SettingsPage() {
     }
   }
 
+  async function loadSuppliers() {
+    if (!isConfigured) return
+    setLoadingSuppliers(true)
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const sb = createClient()
+      const { data } = await sb.from('suppliers').select('*').order('name')
+      setSuppliers((data ?? []) as SupplierRow[])
+    } finally {
+      setLoadingSuppliers(false)
+    }
+  }
+
+  async function loadRecipients() {
+    if (!isConfigured) return
+    setLoadingRecipients(true)
+    setRecipientError('')
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const sb = createClient()
+      const { data } = await sb.from('alert_recipients').select('id, email').order('email')
+      setRecipients((data ?? []) as { id: string; email: string }[])
+    } finally {
+      setLoadingRecipients(false)
+    }
+  }
+
+  async function loadAuditLog() {
+    if (!isConfigured) return
+    setLoadingAudit(true)
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const sb = createClient()
+      const { data } = await sb
+        .from('audit_log')
+        .select('id, actor_name, actor_email, action, entity_type, entity_label, created_at')
+        .order('created_at', { ascending: false })
+        .limit(200)
+      setAuditRows((data ?? []) as AuditRow[])
+    } finally {
+      setLoadingAudit(false)
+    }
+  }
+
+  async function addRecipient(e: React.FormEvent) {
+    e.preventDefault()
+    const email = recipientInput.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setRecipientError('Enter a valid email address.'); return }
+    if (recipients.some(r => r.email.toLowerCase() === email)) { setRecipientError('That address is already on the list.'); return }
+    setRecipientError('')
+    setSavingRecipient(true)
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        const { data, error } = await sb.from('alert_recipients').insert({ email }).select('id, email').single()
+        if (error) { setRecipientError(error.message); return }
+        setRecipients(prev => [...prev, data as { id: string; email: string }].sort((a, b) => a.email.localeCompare(b.email)))
+      } else {
+        setRecipients(prev => [...prev, { id: generateId(), email }].sort((a, b) => a.email.localeCompare(b.email)))
+      }
+      setRecipientInput('')
+    } finally {
+      setSavingRecipient(false)
+    }
+  }
+
+  async function removeRecipient(row: { id: string; email: string }) {
+    setRecipientError('')
+    setDeletingRecipientId(row.id)
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        const { error } = await sb.from('alert_recipients').delete().eq('id', row.id)
+        if (error) { setRecipientError(error.message); return }
+      }
+      setRecipients(prev => prev.filter(r => r.id !== row.id))
+    } finally {
+      setDeletingRecipientId(null)
+    }
+  }
+
+  async function loadCategories() {
+    if (!isConfigured) return
+    setLoadingCategories(true)
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const sb = createClient()
+      const { data } = await sb.from('categories').select('*').order('name')
+      setCategories((data ?? []) as { id: string; name: string; created_at?: string }[])
+    } finally {
+      setLoadingCategories(false)
+    }
+  }
+
+  async function addCategory(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newCategory.trim()
+    if (!name) { setCategoryError('Enter a category name.'); return }
+    if (categories.some(c => c.name.toLowerCase() === name.toLowerCase())) { setCategoryError('That category already exists.'); return }
+    setCategoryError('')
+    setAddingCategory(true)
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        const { data, error } = await sb.from('categories').insert({ name }).select().single()
+        if (error) { setCategoryError(error.message); return }
+        setCategories(prev => [...prev, data as { id: string; name: string }].sort((a, b) => a.name.localeCompare(b.name)))
+      } else {
+        setCategories(prev => [...prev, { id: generateId(), name }].sort((a, b) => a.name.localeCompare(b.name)))
+      }
+      setNewCategory('')
+    } finally {
+      setAddingCategory(false)
+    }
+  }
+
+  async function deleteCategory(row: { id: string; name: string }) {
+    setCategoryError('')
+    setDeletingCategoryId(row.id)
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        const { count } = await sb.from('products').select('id', { count: 'exact', head: true }).eq('category', row.name)
+        if ((count ?? 0) > 0) {
+          setCategoryError(`${count} product${count === 1 ? '' : 's'} still use "${row.name}" — reassign them first.`)
+          return
+        }
+        if (!confirm(`Delete category "${row.name}"?`)) return
+        const { error } = await sb.from('categories').delete().eq('id', row.id)
+        if (error) { setCategoryError(error.message); return }
+      } else if (!confirm(`Delete category "${row.name}"?`)) {
+        return
+      }
+      setCategories(prev => prev.filter(c => c.id !== row.id))
+    } finally {
+      setDeletingCategoryId(null)
+    }
+  }
+
+  function openSupplierModal(row?: SupplierRow) {
+    setSupplierError('')
+    if (row) {
+      setSupplierModalMode('edit')
+      setSupplierEditId(row.id)
+      setSupplierForm({
+        name: row.name ?? '', contact_person: row.contact_person ?? '', email: row.email ?? '',
+        phone: row.phone ?? '', address: row.address ?? '', country: row.country ?? '',
+        lead_time_days: row.lead_time_days != null ? String(row.lead_time_days) : '',
+      })
+    } else {
+      setSupplierModalMode('add')
+      setSupplierEditId(null)
+      setSupplierForm({ name: '', contact_person: '', email: '', phone: '', address: '', country: '', lead_time_days: '' })
+    }
+  }
+
+  async function saveSupplier(e: React.FormEvent) {
+    e.preventDefault()
+    if (!supplierForm.name.trim()) { setSupplierError('Supplier name is required.'); return }
+    const leadRaw = supplierForm.lead_time_days.trim()
+    if (leadRaw !== '' && (!/^\d+$/.test(leadRaw) || Number(leadRaw) > 3650)) {
+      setSupplierError('Lead time must be a whole number of days (0–3650).'); return
+    }
+    setSupplierError('')
+    setSavingSupplier(true)
+    const payload = {
+      name: supplierForm.name.trim(),
+      contact_person: supplierForm.contact_person.trim() || null,
+      email: supplierForm.email.trim() || null,
+      phone: supplierForm.phone.trim() || null,
+      address: supplierForm.address.trim() || null,
+      country: supplierForm.country.trim() || null,
+      lead_time_days: leadRaw === '' ? null : Number(leadRaw),
+    }
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        if (supplierModalMode === 'edit' && supplierEditId) {
+          const { data, error } = await sb.from('suppliers').update(payload).eq('id', supplierEditId).select().single()
+          if (error) { setSupplierError(error.message); return }
+          setSuppliers(prev => prev.map(s => s.id === supplierEditId ? (data as SupplierRow) : s).sort((a, b) => a.name.localeCompare(b.name)))
+        } else {
+          const { data, error } = await sb.from('suppliers').insert(payload).select().single()
+          if (error) { setSupplierError(error.message); return }
+          setSuppliers(prev => [...prev, data as SupplierRow].sort((a, b) => a.name.localeCompare(b.name)))
+        }
+      } else {
+        if (supplierModalMode === 'edit' && supplierEditId) {
+          setSuppliers(prev => prev.map(s => s.id === supplierEditId ? { ...s, ...payload } : s).sort((a, b) => a.name.localeCompare(b.name)))
+        } else {
+          setSuppliers(prev => [...prev, { id: generateId(), ...payload }].sort((a, b) => a.name.localeCompare(b.name)))
+        }
+      }
+      setSupplierModalMode(null)
+      setSupplierEditId(null)
+    } finally {
+      setSavingSupplier(false)
+    }
+  }
+
+  async function deleteSupplier(row: SupplierRow) {
+    if (!confirm(`Delete supplier "${row.name}"? A snapshot is kept in the audit log. Any products or purchase orders that used it stay, with the supplier field cleared.`)) return
+    setSupplierError('')
+    setDeletingSupplierId(row.id)
+    try {
+      if (isConfigured) {
+        const { createClient } = await import('@/lib/supabase/client')
+        const sb = createClient()
+        // delete_supplier_cascade: audit_log snapshot + null the supplier out of
+        // products / purchase_orders, then delete — so it can't be blocked by FKs.
+        const { error } = await sb.rpc('delete_supplier_cascade', { s_id: row.id })
+        if (error) { setSupplierError(error.message); return }
+      }
+      setSuppliers(prev => prev.filter(s => s.id !== row.id))
+    } finally {
+      setDeletingSupplierId(null)
+    }
+  }
+
   useEffect(() => {
     if (activeTab === 'users') loadUsers()
+    if (activeTab === 'suppliers') loadSuppliers()
+    if (activeTab === 'categories') loadCategories()
+    if (activeTab === 'email-alerts') loadRecipients()
+    if (activeTab === 'audit-log') loadAuditLog()
   }, [activeTab])
 
   useEffect(() => {
@@ -92,7 +360,7 @@ export default function SettingsPage() {
       if (!res.ok) {
         setInviteError(data.error || `Error ${res.status}: ${text.slice(0, 300)}`)
       } else {
-        setInviteSuccess(`User ${inviteForm.name} created! Share their credentials: ${inviteForm.email} / ${inviteForm.password}`)
+        setInviteSuccess(`User ${inviteForm.name} created successfully. Make sure you've noted their temporary password before closing this window.`)
         setInviteForm({ name: '', email: '', role: 'staff', password: '' })
         loadUsers()
       }
@@ -240,7 +508,7 @@ export default function SettingsPage() {
                   <input type="text" className="input-field" value={generalForm.location} onChange={e => setGeneralForm(f => ({ ...f, location: e.target.value }))} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Currency (e.g. SGD (S$))</label>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Home currency (e.g. SGD (S$))</label>
                   <input type="text" className="input-field" value={generalForm.currency} onChange={e => setGeneralForm(f => ({ ...f, currency: e.target.value }))} placeholder="e.g. SGD (S$) or PHP (₱)" />
                 </div>
                 <div>
@@ -254,7 +522,7 @@ export default function SettingsPage() {
               </div>
 
               <div style={{ padding: '12px 16px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, fontSize: 12, color: '#0369A1' }}>
-                Currency format: type the code and symbol in parentheses, e.g. <strong>SGD (S$)</strong> or <strong>USD ($)</strong>. The symbol is used throughout the app.
+                Currency format: type the code and symbol in parentheses, e.g. <strong>SGD (S$)</strong> or <strong>USD ($)</strong>. This is the home currency: totals, reports and purchase orders are shown in it, and products priced in other currencies are converted at daily exchange rates.
               </div>
 
               {saved && (
@@ -382,6 +650,149 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {activeTab === 'suppliers' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>Suppliers</h3>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {supplierError && (
+                    <span style={{ fontSize: 12, color: '#991B1B', fontWeight: 600 }}>{supplierError}</span>
+                  )}
+                  <button className="btn-secondary btn-sm" onClick={() => { setSupplierError(''); loadSuppliers() }}>
+                    <RefreshCw size={13} style={{ animation: loadingSuppliers ? 'spin 1s linear infinite' : 'none' }} />
+                    Refresh
+                  </button>
+                  <button className="btn-primary btn-sm" onClick={() => openSupplierModal()}>
+                    <Plus size={14} /> Add Supplier
+                  </button>
+                </div>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+                      {['Supplier', 'Country', 'Lead Time', 'Contact Person', 'Email', 'Phone', 'Actions'].map(col => (
+                        <th key={col} style={{ padding: '12px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suppliers.length === 0 && !loadingSuppliers && (
+                      <tr>
+                        <td colSpan={7} style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+                          {isConfigured ? 'No suppliers yet. Click "Add Supplier" to create one.' : 'Connect Supabase to manage suppliers.'}
+                        </td>
+                      </tr>
+                    )}
+                    {suppliers.map((s, i) => (
+                      <tr key={s.id} className="table-row-hover" style={{ borderBottom: i < suppliers.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                        <td style={{ padding: '14px 20px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                              width: 34, height: 34, borderRadius: 10, background: '#E0F7FA',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                            }}>
+                              <Truck size={16} style={{ color: '#2FA6B8' }} />
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{s.name}</div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.country || '—'}</td>
+                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>
+                          {s.lead_time_days != null ? `${s.lead_time_days} day${s.lead_time_days === 1 ? '' : 's'}` : '—'}
+                        </td>
+                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.contact_person || '—'}</td>
+                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.email || '—'}</td>
+                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.phone || '—'}</td>
+                        <td style={{ padding: '14px 20px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              onClick={() => openSupplierModal(s)}
+                              title="Edit supplier"
+                              style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E2E8F0', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteSupplier(s)}
+                              disabled={deletingSupplierId === s.id}
+                              title="Delete supplier"
+                              style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #FECACA', background: '#FEE2E2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991B1B', opacity: deletingSupplierId === s.id ? 0.4 : 1 }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: '14px 24px', background: '#F8FAFC', borderTop: '1px solid #E2E8F0', fontSize: 12, color: '#64748B' }}>
+                Suppliers appear in the dropdown when creating a Purchase Order, and on the downloaded PO document. Lead time is the supplier&rsquo;s production time in days — the Create PO dialog uses it to estimate when goods will be ready so you know when to order.
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'categories' && (
+            <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottom: '1px solid #F1F5F9' }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>Product Categories</h3>
+                <button className="btn-secondary btn-sm" onClick={() => { setCategoryError(''); loadCategories() }}>
+                  <RefreshCw size={13} style={{ animation: loadingCategories ? 'spin 1s linear infinite' : 'none' }} />
+                  Refresh
+                </button>
+              </div>
+
+              <form onSubmit={addCategory} style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="input-field" style={{ flex: 1 }} placeholder="New category name (e.g. Consumables)"
+                  value={newCategory} onChange={e => setNewCategory(e.target.value)}
+                />
+                <button type="submit" className="btn-primary btn-sm" disabled={addingCategory}>
+                  <Plus size={14} /> {addingCategory ? 'Adding…' : 'Add'}
+                </button>
+              </form>
+
+              {categoryError && (
+                <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B', fontWeight: 600 }}>
+                  {categoryError}
+                </div>
+              )}
+
+              {categories.length === 0 && !loadingCategories ? (
+                <div style={{ fontSize: 13, color: '#94A3B8', padding: '8px 0' }}>
+                  {isConfigured ? 'No categories yet — add one above.' : 'Connect Supabase to manage categories.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {categories.map(c => (
+                    <div key={c.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      border: '1px solid #E2E8F0', borderRadius: 999, padding: '6px 6px 6px 14px', background: '#F8FAFC',
+                    }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{c.name}</span>
+                      <button
+                        onClick={() => deleteCategory(c)}
+                        disabled={deletingCategoryId === c.id}
+                        title={`Delete "${c.name}"`}
+                        style={{ width: 22, height: 22, borderRadius: '50%', border: '1px solid #FECACA', background: '#FEE2E2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991B1B', opacity: deletingCategoryId === c.id ? 0.4 : 1 }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ fontSize: 12, color: '#64748B', background: '#F8FAFC', border: '1px solid #F1F5F9', borderRadius: 10, padding: '12px 14px' }}>
+                Categories show up in the Add / Edit Product forms and the Inventory filter. A category that products are still using can&rsquo;t be deleted until those products are moved to another category.
+              </div>
+            </div>
+          )}
+
           {activeTab === 'alerts' && (() => {
             const ALERT_KEYS = [
               { key: 'lowStock',      label: 'Low Stock Alerts',          desc: 'Notify when stock falls below reorder level', def: true },
@@ -426,28 +837,122 @@ export default function SettingsPage() {
             )
           })()}
 
+          {activeTab === 'email-alerts' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>Email Alerts</h3>
+                  <p style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>Addresses that receive the once-a-day digest of open stock &amp; expiry alerts.</p>
+                </div>
+                <button className="btn-secondary btn-sm" onClick={() => { setRecipientError(''); loadRecipients() }}>
+                  <RefreshCw size={13} style={{ animation: loadingRecipients ? 'spin 1s linear infinite' : 'none' }} />
+                  Refresh
+                </button>
+              </div>
+              <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <form onSubmit={addRecipient} style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="email" className="input-field" style={{ flex: 1 }} placeholder="name@ibgctasia.com"
+                    value={recipientInput} onChange={e => setRecipientInput(e.target.value)}
+                  />
+                  <button type="submit" className="btn-primary btn-sm" disabled={savingRecipient || !isConfigured}>
+                    <Plus size={14} /> {savingRecipient ? 'Adding…' : 'Add'}
+                  </button>
+                </form>
+
+                {recipientError && (
+                  <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B', fontWeight: 600 }}>
+                    {recipientError}
+                  </div>
+                )}
+
+                {!isConfigured ? (
+                  <div style={{ fontSize: 13, color: '#94A3B8', padding: '8px 0' }}>Connect Supabase to manage email recipients.</div>
+                ) : recipients.length === 0 && !loadingRecipients ? (
+                  <div style={{ fontSize: 13, color: '#94A3B8', padding: '8px 0' }}>No recipients yet — the daily digest will not be sent until at least one address is added.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {recipients.map(r => (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: '#F8FAFC', border: '1px solid #F1F5F9' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#0F172A', fontWeight: 500 }}>
+                          <Mail size={14} style={{ color: '#2FA6B8' }} /> {r.email}
+                        </span>
+                        <button
+                          onClick={() => removeRecipient(r)}
+                          disabled={deletingRecipientId === r.id}
+                          title="Remove recipient"
+                          style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid #FECACA', background: '#FEE2E2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991B1B', opacity: deletingRecipientId === r.id ? 0.4 : 1 }}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize: 12, color: '#64748B', background: '#F8FAFC', border: '1px solid #F1F5F9', borderRadius: 10, padding: '12px 14px', lineHeight: 1.6 }}>
+                  The digest is delivered by the <code style={{ fontFamily: 'monospace', fontSize: 11, background: '#EEF2F6', padding: '1px 5px', borderRadius: 4 }}>send-alert-digest</code> Supabase Edge Function. Each alert is emailed once. See <code style={{ fontFamily: 'monospace', fontSize: 11, background: '#EEF2F6', padding: '1px 5px', borderRadius: 4 }}>supabase/functions/send-alert-digest/README.md</code> in the repo for the one-time SMTP + schedule setup.
+                </div>
+              </div>
+            </div>
+          )}
+
+
+          {activeTab === 'audit-log' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>Audit Log</h3>
+                  <p style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>Every product or supplier deletion, with who did it and a full snapshot of the record. Append-only.</p>
+                </div>
+                <button className="btn-secondary btn-sm" onClick={loadAuditLog}>
+                  <RefreshCw size={13} style={{ animation: loadingAudit ? 'spin 1s linear infinite' : 'none' }} />
+                  Refresh
+                </button>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+                      {['When', 'Who', 'Action', 'Type', 'Item'].map(col => (
+                        <th key={col} style={{ padding: '12px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditRows.length === 0 && !loadingAudit && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+                          {isConfigured ? 'No deletions recorded yet.' : 'Connect Supabase to view the audit log.'}
+                        </td>
+                      </tr>
+                    )}
+                    {auditRows.map((r, i) => (
+                      <tr key={r.id} className="table-row-hover" style={{ borderBottom: i < auditRows.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                        <td style={{ padding: '12px 20px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>{formatDateTime(r.created_at)}</td>
+                        <td style={{ padding: '12px 20px', fontSize: 13, color: '#374151' }}>{r.actor_name || r.actor_email || '—'}</td>
+                        <td style={{ padding: '12px 20px' }}>
+                          <span className="badge badge-danger" style={{ fontSize: 11, textTransform: 'capitalize' }}>{r.action}</span>
+                        </td>
+                        <td style={{ padding: '12px 20px', fontSize: 13, color: '#374151', textTransform: 'capitalize' }}>{r.entity_type}</td>
+                        <td style={{ padding: '12px 20px', fontSize: 13, fontWeight: 600, color: '#111827' }}>{r.entity_label || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: '14px 24px', background: '#F8FAFC', borderTop: '1px solid #E2E8F0', fontSize: 12, color: '#64748B' }}>
+                Deleting a product or supplier now always succeeds: stock movements and purchase orders are kept, just unlinked from the deleted record. The full snapshot lives here (last 200 shown).
+              </div>
+            </div>
+          )}
+
           {activeTab === 'database' && (
             <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', paddingBottom: 12, borderBottom: '1px solid #F1F5F9' }}>Database & Supabase</h3>
-              <div style={{ padding: 20, background: '#F0FDF4', borderRadius: 12, border: '1px solid #BBF7D0' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#15803D', marginBottom: 4 }}>Connection Status</div>
-                <div style={{ fontSize: 12, color: '#166534' }}>
-                  Running with mock data. Connect a Supabase project in General Settings to enable persistent storage.
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>Database Tables</div>
-                {['products', 'suppliers', 'purchase_orders', 'purchase_order_items', 'transactions', 'alerts', 'users'].map(table => (
-                  <div key={table} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderRadius: 10, background: '#F8FAFC', border: '1px solid #F1F5F9', marginBottom: 6 }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 13, color: '#2FA6B8', fontWeight: 600 }}>{table}</span>
-                    <span className="badge badge-info" style={{ fontSize: 10 }}>Schema Ready</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-secondary btn-sm"><Database size={14} /> Run Migrations</button>
-                <button className="btn-secondary btn-sm"><Database size={14} /> Seed Sample Data</button>
-              </div>
+              <DatabaseStatusPanel />
             </div>
           )}
         </div>
@@ -605,6 +1110,76 @@ export default function SettingsPage() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Add / Edit Modal */}
+      {supplierModalMode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 460, padding: 28, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
+            <button
+              onClick={() => setSupplierModalMode(null)}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' }}
+            >
+              <X size={18} />
+            </button>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>
+              {supplierModalMode === 'edit' ? 'Edit Supplier' : 'Add Supplier'}
+            </h3>
+            <p style={{ fontSize: 13, color: '#64748B', marginBottom: 20 }}>Only the name is required — the rest shows on the purchase order.</p>
+            <form onSubmit={saveSupplier} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Supplier Name *</label>
+                <input type="text" className="input-field" required placeholder="e.g. MedSupply Co."
+                  value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Contact Person</label>
+                  <input type="text" className="input-field" placeholder="e.g. Jane Cruz"
+                    value={supplierForm.contact_person} onChange={e => setSupplierForm(f => ({ ...f, contact_person: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Phone</label>
+                  <input type="text" className="input-field" placeholder="e.g. +63 917 000 0000"
+                    value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Email</label>
+                <input type="email" className="input-field" placeholder="e.g. orders@medsupply.com"
+                  value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Country</label>
+                  <input type="text" className="input-field" placeholder="e.g. Germany"
+                    value={supplierForm.country} onChange={e => setSupplierForm(f => ({ ...f, country: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Lead time to produce (days)</label>
+                  <input type="number" min={0} max={3650} className="input-field" placeholder="e.g. 45"
+                    value={supplierForm.lead_time_days} onChange={e => setSupplierForm(f => ({ ...f, lead_time_days: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Address</label>
+                <textarea className="input-field" rows={2} placeholder="Street, city, country" style={{ resize: 'vertical' }}
+                  value={supplierForm.address} onChange={e => setSupplierForm(f => ({ ...f, address: e.target.value }))} />
+              </div>
+              {supplierError && (
+                <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B', fontWeight: 600 }}>
+                  {supplierError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
+                <button type="button" className="btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setSupplierModalMode(null)}>Cancel</button>
+                <button type="submit" className="btn-primary btn-sm" style={{ flex: 1 }} disabled={savingSupplier}>
+                  {savingSupplier ? 'Saving…' : supplierModalMode === 'edit' ? 'Save Changes' : 'Add Supplier'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

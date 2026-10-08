@@ -89,11 +89,11 @@ export default function Sidebar() {
       {/* Footer */}
       <div style={{ padding: '16px 12px', borderTop: '1px solid #F1F5F9' }}>
         <div style={{
-          background: '#F0FDFE',
-          border: '1px solid #BAE6FD',
+          background: '#ECFEFF',
+          border: '1px solid #A5F3FC',
           borderRadius: 10, padding: '10px 12px',
         }}>
-          <div style={{ color: '#0891B2', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>I-BG CT Asia</div>
+          <div style={{ color: '#1E7A8A', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>Internal System</div>
           <div style={{ color: '#64748B', fontSize: 10 }}>Authorized personnel only</div>
         </div>
       </div>
