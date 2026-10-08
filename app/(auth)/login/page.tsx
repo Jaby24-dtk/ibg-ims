@@ -46,7 +46,8 @@ const LOGIN_CSS = `
 .ib-mesh{position:absolute;inset:0;opacity:.13;background-image:linear-gradient(#4de4ec22 1px,transparent 1px),linear-gradient(90deg,#4de4ec22 1px,transparent 1px);background-size:58px 58px;-webkit-mask-image:linear-gradient(90deg,transparent,#000);mask-image:linear-gradient(90deg,transparent,#000);pointer-events:none}
 .ib-orb{position:absolute;width:440px;height:440px;right:-120px;top:18%;border-radius:50%;background:#20c8e4;filter:blur(140px);opacity:.12;animation:ibBreathe 7s ease-in-out infinite alternate}
 .ib-brand{display:flex;align-items:center;gap:15px;position:relative;z-index:2}
-.ib-logo{width:96px;height:96px;object-fit:contain;filter:brightness(0) invert(1)}
+.ib-logo-circle{width:104px;height:104px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 10px 30px rgba(0,0,0,.35),0 0 0 4px rgba(77,228,236,.14)}
+.ib-logo{width:76px;height:76px;object-fit:contain}
 .ib-brand-label{font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:#b3cbd6;line-height:1.8}
 .ib-content{position:relative;z-index:2;max-width:620px;padding:65px 0 45px}
 .ib-eyebrow{display:inline-flex;align-items:center;gap:10px;border:1px solid #54dbe744;border-radius:100px;padding:9px 15px;color:#b9edf0;font-size:10px;letter-spacing:.19em;font-weight:700}
@@ -74,7 +75,8 @@ const LOGIN_CSS = `
 .ib-login-side{position:relative;background:linear-gradient(145deg,#eaf4f8,#f9fcfe 60%,#e5f2f7);color:#122030;display:flex;align-items:center;justify-content:center;padding:60px 34px;overflow:hidden}
 .ib-login-side:before{content:"";position:absolute;width:700px;height:700px;border:1px solid #bbd9e4;border-radius:100px;transform:rotate(34deg);top:-530px;right:-300px}
 .ib-panel{position:relative;width:100%;max-width:440px;background:#ffffffed;border:1px solid #fff;box-shadow:0 30px 90px #173d501e,0 3px 15px #183e4b0b;border-radius:27px;padding:clamp(27px,3.2vw,48px);animation:ibArrive .9s both}
-.ib-panel-logo{display:block;width:122px;height:122px;object-fit:contain;margin:0 auto 12px}
+.ib-panel-logo-circle{width:128px;height:128px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;border:1px solid #dce9ef;box-shadow:0 12px 30px #173d5018}
+.ib-panel-logo{width:94px;height:94px;object-fit:contain}
 .ib-panel h2{font-size:32px;letter-spacing:-.05em;margin:15px 0 7px;font-weight:800;color:#122030}
 .ib-sub{font-size:12px;color:#718399;line-height:1.7;margin:0 0 29px}
 .ib-field-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 9px}
@@ -98,7 +100,7 @@ const LOGIN_CSS = `
 @keyframes ibArrive{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:1160px){.ib-analytics{opacity:.65;right:1%;width:175px}.ib-content{max-width:480px}.ib-hero h1{font-size:55px}}
 @media(max-width:880px){.ib-layout{grid-template-columns:1fr}.ib-hero{min-height:650px;padding:35px}.ib-content{padding:65px 0}.ib-analytics{right:4%;top:22%}.ib-login-side{padding:70px 22px}.ib-panel{max-width:490px}.ib-hero .ib-features{max-width:550px}}
-@media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo{width:70px;height:70px}.ib-brand-label{font-size:9px}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
+@media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo-circle{width:78px;height:78px}.ib-logo{width:56px;height:56px}.ib-brand-label{font-size:9px}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
 @media(prefers-reduced-motion:reduce){.ib-layout *,.ib-layout *:before,.ib-layout *:after{animation:none!important;transition:none!important}}
 `
 
@@ -224,7 +226,7 @@ export default function LoginPage() {
         <div className="ib-orb" />
         <header className="ib-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="ib-logo" src="/ibg-mark.png" alt="I-BG CT Asia logo" />
+          <div className="ib-logo-circle"><img className="ib-logo" src="/ibg-mark.png" alt="I-BG CT Asia logo" /></div>
           <div className="ib-brand-label">I-BG CT ASIA<br />Inventory Management System</div>
         </header>
         <div className="ib-analytics" aria-hidden="true">
@@ -257,7 +259,7 @@ export default function LoginPage() {
       <section className="ib-login-side">
         <div className="ib-panel">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/ibg-mark.png" alt="I-BG CT Asia logo" className="ib-panel-logo" />
+          <div className="ib-panel-logo-circle"><img src="/ibg-mark.png" alt="I-BG CT Asia logo" className="ib-panel-logo" /></div>
           <h2>{forgotMode ? 'Reset password.' : 'Welcome back.'}</h2>
           <p className="ib-sub">
             {forgotMode
