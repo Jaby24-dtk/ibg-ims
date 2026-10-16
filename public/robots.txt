@@ -1,0 +1,3 @@
+# Private, sign-in-only system. No search engines, AI crawlers or agents.
+User-agent: *
+Disallow: /
