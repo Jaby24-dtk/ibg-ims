@@ -103,6 +103,8 @@ const LOGIN_CSS = `
 @media(max-width:1160px){.ib-analytics{opacity:.65;right:1%;width:175px}.ib-content{max-width:480px}.ib-hero h1{font-size:55px}}
 @media(max-width:880px){.ib-layout{grid-template-columns:1fr}.ib-hero{min-height:650px;padding:35px}.ib-content{padding:65px 0}.ib-analytics{right:4%;top:22%}.ib-login-side{padding:70px 22px}.ib-panel{max-width:490px}.ib-hero .ib-features{max-width:550px}}
 @media(max-width:600px){.ib-hero{min-height:590px;padding:27px}.ib-logo-circle{width:78px;height:78px}.ib-logo{width:56px;height:56px}.ib-brand-name{font-size:22px}.ib-brand-sub{font-size:10px;letter-spacing:.18em}.ib-content{padding:42px 0 25px}.ib-hero h1{font-size:clamp(40px,10vw,55px)}.ib-analytics{display:none}.ib-features{gap:8px}.ib-feature{padding:14px 10px}.ib-feature b{font-size:10px}.ib-feature small{font-size:9px}.ib-feature svg{width:20px;height:20px}.ib-login-side{padding:45px 15px}.ib-panel{padding:28px 22px}}
+/* Short screens (e.g. inside STIV's Systems panel): fit everything in one screen, sign-in box always visible. */
+@media(max-height:760px) and (min-width:851px){.gz-shell{height:100vh;min-height:0;overflow:hidden}.gz-hero{min-height:0;height:100vh;padding:22px clamp(24px,4vw,56px)}.gz-hero-content{margin-top:clamp(28px,8vh,70px)}.gz-hero h1{font-size:clamp(30px,3.6vw,50px);margin:14px 0 12px}.gz-features,.gz-metrics,.gz-visual{display:none}.gz-copyright{bottom:14px}.gz-login-side{padding:16px}.gz-card{padding:26px 26px}}
 @media(prefers-reduced-motion:reduce){.ib-layout *,.ib-layout *:before,.ib-layout *:after{animation:none!important;transition:none!important}}
 `
 
