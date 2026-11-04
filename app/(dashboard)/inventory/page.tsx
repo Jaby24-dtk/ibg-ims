@@ -6,20 +6,25 @@ import {
   Eye, Edit2, AlertTriangle, CheckCircle, Camera, Gift, Trash2, TrendingUp, GitMerge,
 } from 'lucide-react'
 import { mockProducts, mockSuppliers, mockTransactions } from '@/lib/mock-data'
-import { getStockStatus, getExpiryStatus, type Product, type ProductBatch, type ProductStock, type StockLocation, type Supplier, type TransactionType } from '@/types'
+import { getStockStatus, getExpiryStatus, type Product, type ProductBatch, type ProductStock, type StockLocation, type StorageBin, type Supplier, type TransactionType } from '@/types'
 import { formatCurrency, formatDate, daysUntil, generateId } from '@/lib/utils'
 import { CURRENCIES, getBaseCurrency, productCurrency, formatMoney } from '@/lib/currency'
 import { usageByProduct, getReorderInfo, reorderLabel, reorderBadgeClass, USAGE_WINDOW_DAYS, type ReorderInfo } from '@/lib/reorder'
 import { syncReorderAlerts } from '@/lib/generate-alerts'
 import CameraScanner from '@/components/inventory/CameraScanner'
+import PhotoScanButton from '@/components/inventory/PhotoScanButton'
+import { useWedgeScanner } from '@/lib/use-wedge-scanner'
+import { parseGS1, isGS1Fragment, barcodeKey, storedBarcode, type GS1Data } from '@/lib/gs1'
 import { useRole, canEdit, canExport } from '@/lib/use-role'
 import { DEFAULT_CATEGORIES, UNCATEGORIZED, categoryBadgeClass, categoryIconStyle } from '@/lib/categories'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/context/AuthContext'
 import { uploadProductImage, removeProductImage } from '@/lib/product-image'
-import { loadStockLocations, loadBatches, sortBatches, moveStock } from '@/lib/stock'
+import { loadStockLocations, loadBatches, loadBins, sortBatches, moveStock, compareBinCodes } from '@/lib/stock'
 import BatchesPanel from '@/components/inventory/BatchesPanel'
 import MergePanel from '@/components/inventory/MergePanel'
+import { usePaged } from '@/components/ui/Pager'
+import { useApprovals } from '@/lib/approvals'
 
 const supabaseConfigured = (() => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -61,8 +66,18 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'newest', label: 'Newest added' },
 ]
 
+// Supplier brand/SKU are only sent when filled in (or being cleared on a product
+// that has them), so adding/editing still works before the 2026-10-22 migration.
+function supplierFields(f: { supplier_brand: string; supplier_sku: string }, existing?: Product) {
+  const out: { supplier_brand?: string | null; supplier_sku?: string | null } = {}
+  const b = f.supplier_brand.trim(), k = f.supplier_sku.trim()
+  if (b || existing?.supplier_brand) out.supplier_brand = b || null
+  if (k || existing?.supplier_sku) out.supplier_sku = k || null
+  return out
+}
+
 const FIELD_LABELS: Record<string, string> = {
-  name: 'name', barcode: 'barcode', brand: 'brand', description: 'description', batch_number: 'batch',
+  name: 'name', barcode: 'barcode', brand: 'I-BG brand', supplier_brand: 'supplier brand', supplier_sku: 'supplier SKU', description: 'description', batch_number: 'batch',
   expiry_date: 'expiry', category: 'category', unit_cost: 'unit cost', selling_price: 'selling price', reorder_level: 'reorder level',
 }
 
@@ -79,6 +94,7 @@ export default function InventoryPage() {
   // (not next/navigation's useSearchParams) so this page can stay statically
   // prerendered instead of needing a Suspense boundary.
   const [sortBy, setSortBy] = useState<SortKey>('recommended')
+  const canReleaseBatches = useApprovals(role).can('batch_hold')
   const [groupByCategory, setGroupByCategory] = useState(false)
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('sort')
@@ -99,19 +115,22 @@ export default function InventoryPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState<Product | null>(null)
   const [addForm, setAddForm] = useState({
-    name: '', sku: '', barcode: '', brand: '', batch_number: '',
+    name: '', sku: '', barcode: '', brand: '', supplier_brand: '', supplier_sku: '', batch_number: '',
     expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '',
     stock_quantity: '', category: 'General', description: '', currency: getBaseCurrency(),
   })
   const [sampleQty, setSampleQty] = useState('1')
   const [sampleError, setSampleError] = useState('')
   const [saleQty, setSaleQty] = useState('1')
+  // Who got the units — kept on the movement so a batch recall can reach them.
+  const [saleTo, setSaleTo] = useState('')
+  const [sampleTo, setSampleTo] = useState('')
   const [saleError, setSaleError] = useState('')
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [editForm, setEditForm] = useState({
-    name: '', sku: '', barcode: '', brand: '', batch_number: '',
+    name: '', sku: '', barcode: '', brand: '', supplier_brand: '', supplier_sku: '', batch_number: '',
     expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '',
-    stock_quantity: '', category: 'General', description: '', currency: getBaseCurrency(),
+    stock_quantity: '', category: 'General', description: '', currency: getBaseCurrency(), bin_id: '',
   })
   const [editError, setEditError] = useState('')
   // Edit modal: the other product that already owns the SKU being saved (offers a one-click merge).
@@ -128,10 +147,16 @@ export default function InventoryPage() {
   const [barcodeInput, setBarcodeInput] = useState('')
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([])
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error' | null; msg: string }>({ type: null, msg: '' })
+  // Scanner purpose: 'stock' = movements (receive/outbound/…); 'assign' = save the scanned
+  // code as the chosen product's barcode, then move on to the next product without one.
+  const [scanPurpose, setScanPurpose] = useState<'stock' | 'assign'>('stock')
+  const [assignTargetId, setAssignTargetId] = useState('')
+  const [assignBusy, setAssignBusy] = useState(false)
+  const [assignLog, setAssignLog] = useState<{ productId: string; name: string; barcode: string; prev: string | null }[]>([])
   const [products, setProducts] = useState<Product[]>(supabaseConfigured ? [] : mockProducts)
   const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORIES)
 
-  // Per-location stock — only BeSuro SKUs synced with Shopify have it ("located"
+  // Per-location stock — only products tracked per site have it ("located"
   // products); for them products.stock_quantity is the sum, kept by a DB trigger.
   const [locations, setLocations] = useState<StockLocation[]>([])
   const [productStock, setProductStock] = useState<ProductStock[]>([])
@@ -151,6 +176,16 @@ export default function InventoryPage() {
   // run yet) → old behaviour: one batch number + expiry per product.
   const [batches, setBatches] = useState<ProductBatch[] | null>(null)
   const batchesOn = batches !== null
+  // Storage locations (2026-10-22 migration). null = not available → location UI hidden.
+  const [bins, setBins] = useState<StorageBin[] | null>(supabaseConfigured ? null : [])
+  const binById = useMemo(() => new Map((bins ?? []).map(b => [b.id, b])), [bins])
+  // Every location a product's stock is in: its default location plus each batch's.
+  const binCodesOf = (p: Product) => {
+    const ids = new Set<string>()
+    if (p.bin_id) ids.add(p.bin_id)
+    for (const b of batchesByProduct.get(p.id) ?? []) if (b.bin_id) ids.add(b.bin_id)
+    return Array.from(ids).map(id => binById.get(id)?.code).filter(Boolean).sort(compareBinCodes as (a?: string, b?: string) => number) as string[]
+  }
   const batchesByProduct = useMemo(() => {
     const m = new Map<string, ProductBatch[]>()
     for (const b of sortBatches(batches ?? [])) {
@@ -162,11 +197,15 @@ export default function InventoryPage() {
   // Units in expired batches — never sent out as samples or sold (the DB refuses too).
   const todayIso = new Date().toISOString().slice(0, 10)
   const expiredQty = (p: Product) => isLocated(p) ? 0
-    : (batchesByProduct.get(p.id) ?? []).filter(b => b.expiry_date && b.expiry_date < todayIso).reduce((n, b) => n + b.quantity, 0)
-  const usableQty = (p: Product) => Math.max(p.stock_quantity - expiredQty(p), 0)
+    : (batchesByProduct.get(p.id) ?? []).filter(b => (b.status ?? 'released') === 'released' && b.expiry_date && b.expiry_date < todayIso).reduce((n, b) => n + b.quantity, 0)
+  // Units in batches on hold or under recall — never sent out either.
+  const blockedQty = (p: Product) => isLocated(p) ? 0
+    : (batchesByProduct.get(p.id) ?? []).filter(b => (b.status ?? 'released') !== 'released').reduce((n, b) => n + b.quantity, 0)
+  const usableQty = (p: Product) => Math.max(p.stock_quantity - expiredQty(p) - blockedQty(p), 0)
   const unitsOf = (p: Product) => {
-    const exp = expiredQty(p)
-    return exp > 0 ? `${usableQty(p)} usable units (${exp} expired)` : `${p.stock_quantity} units`
+    const exp = expiredQty(p), blocked = blockedQty(p)
+    const why = [exp > 0 && `${exp} expired`, blocked > 0 && `${blocked} on hold / recalled`].filter(Boolean).join(', ')
+    return why ? `${usableQty(p)} usable units (${why})` : `${p.stock_quantity} units`
   }
   const reloadBatches = useCallback(async () => {
     if (!supabaseConfigured) return
@@ -236,6 +275,7 @@ export default function InventoryPage() {
       const batchList = await loadBatches(sb)
       if (cancelled) return
       setBatches(batchList)
+      setBins(await loadBins(sb))
       setLocations(stockRes.locations)
       setProductStock(stockRes.stock)
       setLocationId(id => id || (stockRes.locations[0]?.id ?? ''))
@@ -359,6 +399,8 @@ export default function InventoryPage() {
   const searched = products.filter(p => {
     const matchSearch = !q || (p.name ?? '').toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q)
       || (p.barcode ?? '').includes(q) || (p.brand ?? '').toLowerCase().includes(q)
+      || (p.supplier_brand ?? '').toLowerCase().includes(q) || (p.supplier_sku ?? '').toLowerCase().includes(q)
+      || binCodesOf(p).some(c => c.toLowerCase().includes(q))
     const matchCategory = categoryFilter === 'All' || p.category === categoryFilter
     return matchSearch && matchCategory
   })
@@ -375,50 +417,59 @@ export default function InventoryPage() {
     : (a, b) => attention.get(a.id)!.rank - attention.get(b.id)!.rank || expDays(a) - expDays(b) || byName(a, b)
   )
   // Optional grouping by category (sections in the table, each keeping the sort above).
+  // Paged 25 at a time; when grouped, pages run through the categories in order.
+  const catOf = (p: Product) => p.category || UNCATEGORIZED
+  const categoryOrder = Array.from(new Set(filteredProducts.map(catOf))).sort()
+  const ordered = groupByCategory ? categoryOrder.flatMap(c => filteredProducts.filter(p => catOf(p) === c)) : filteredProducts
+  const categoryTotals = new Map(categoryOrder.map(c => [c, filteredProducts.filter(p => catOf(p) === c).length]))
+  const { pageRows: pageProducts, pager } = usePaged(ordered, `${q}|${categoryFilter}|${view}|${sortBy}|${groupByCategory}`)
   const sections: { title: string | null; items: Product[] }[] = groupByCategory
-    ? Array.from(new Set(filteredProducts.map(p => p.category || UNCATEGORIZED))).sort()
-        .map(c => ({ title: c, items: filteredProducts.filter(p => (p.category || UNCATEGORIZED) === c) }))
-    : [{ title: null, items: filteredProducts }]
+    ? categoryOrder.map(c => ({ title: c, items: pageProducts.filter(p => catOf(p) === c) })).filter(sec => sec.items.length)
+    : [{ title: null, items: pageProducts }]
 
-  const handleBarcodeScan = useCallback((rawInput: string) => {
-    const code = rawInput.trim()
-    if (!code) return
-    setBarcodeInput('')
-
-    const found = products.find(p => p.barcode === code || p.sku === code || (p.sku ?? '').toLowerCase() === code.toLowerCase())
-
-    if (found) {
-      setScanFeedback({ type: 'success', msg: `Found: ${found.name}` })
-      const item: ScannedItem = {
-        id: generateId(),
-        product: found,
-        barcode: code,
-        quantity: 1,
-        action: 'receive',
-        batch: '',
-        expiry: '',
-        scannedAt: new Date().toISOString(),
-        found: true,
-      }
-      setScannedItems(prev => [item, ...prev])
-    } else {
-      setScanFeedback({ type: 'error', msg: `Product not found for barcode: ${code}` })
-      const item: ScannedItem = {
-        id: generateId(),
-        product: null,
-        barcode: code,
-        quantity: 1,
-        action: 'receive',
-        batch: '',
-        expiry: '',
-        scannedAt: new Date().toISOString(),
-        found: false,
-      }
-      setScannedItems(prev => [item, ...prev])
+  // Resolve a scan to a product: barcode (GS1 codes by their GTIN, ignoring leading
+  // zeros), then SKU, then — for GS1 labels whose batch field ends with our SKU, like
+  // BeSuro's "(10)26A017BESURO-STK-YLW" — the SKU inside the batch.
+  const matchScan = (raw: string) => {
+    const gs1: GS1Data | null = parseGS1(raw)
+    const code = gs1?.gtin ? storedBarcode(gs1.gtin) : raw.trim()
+    const key = barcodeKey(code)
+    let product = products.find(p => p.barcode && barcodeKey(p.barcode) === key)
+      ?? products.find(p => (p.sku ?? '').toLowerCase() === code.toLowerCase())
+    let batch = gs1?.batch ?? ''
+    const batchUpper = batch.toUpperCase()
+    if (!product && batchUpper) {
+      product = products
+        .filter(p => (p.sku ?? '').length >= 6 && batchUpper.includes(p.sku.toUpperCase()))
+        .sort((a, b) => b.sku.length - a.sku.length)[0]
     }
+    if (product?.sku && batchUpper.length > product.sku.length && batchUpper.endsWith(product.sku.toUpperCase())) {
+      batch = batch.slice(0, batch.length - product.sku.length)
+    }
+    return { product: product ?? null, code, gs1, batch }
+  }
 
-    setTimeout(() => setScanFeedback({ type: null, msg: '' }), 3000)
-  }, [products])
+  const handleBarcodeScan = (rawInput: string) => {
+    if (!rawInput.trim()) return
+    setBarcodeInput('')
+    const { product: found, code, gs1, batch } = matchScan(rawInput)
+    const noBarcodeYet = found && gs1?.gtin && !found.barcode
+    setScanFeedback(found
+      ? { type: 'success', msg: `Found: ${found.name}${noBarcodeYet ? ` (matched by SKU — use Assign barcodes to save ${code} to it)` : ''}` }
+      : { type: 'error', msg: `Product not found for barcode: ${code}` })
+    setScannedItems(prev => [{
+      id: generateId(),
+      product: found,
+      barcode: code,
+      quantity: 1,
+      action: 'receive',
+      batch,
+      expiry: gs1?.expiry ?? '',
+      scannedAt: new Date().toISOString(),
+      found: !!found,
+    }, ...prev])
+    setTimeout(() => setScanFeedback({ type: null, msg: '' }), noBarcodeYet ? 8000 : 3000)
+  }
 
   const saveScannedTransactions = useCallback(async () => {
     const successItems = scannedItems.filter(i => i.found)
@@ -492,11 +543,13 @@ export default function InventoryPage() {
       // blank barcode threw "Cannot read properties of null (reading
       // 'trim')" and the modal just sat there with no error shown.
       name: p.name, sku: p.sku, barcode: p.barcode ?? '', brand: p.brand ?? '',
+      supplier_brand: p.supplier_brand ?? '', supplier_sku: p.supplier_sku ?? '',
       batch_number: p.batch_number ?? '', expiry_date: p.expiry_date ?? '',
       unit_cost: String(p.unit_cost), selling_price: String(p.selling_price),
       reorder_level: String(p.reorder_level), stock_quantity: String(p.stock_quantity),
       category: p.category ?? 'General', description: p.description ?? '',
       currency: productCurrency(p),
+      bin_id: p.bin_id ?? '',
     })
     setEditingProduct(p)
   }
@@ -526,6 +579,7 @@ export default function InventoryPage() {
       sku: editForm.sku.trim(),
       barcode: editForm.barcode.trim() || null,
       brand: editForm.brand.trim(),
+      ...supplierFields(editForm, editingProduct),
       category: normalizeCategory(editForm.category),
       description: editForm.description.trim(),
       // With batches, expiry lives on each batch (edited in the product details).
@@ -536,6 +590,7 @@ export default function InventoryPage() {
       // database that hasn't had the product-currency migration yet.
       ...(editingProduct.currency || editForm.currency !== getBaseCurrency() ? { currency: editForm.currency } : {}),
       reorder_level: parseInt(editForm.reorder_level) || 0,
+      ...(bins ? { bin_id: editForm.bin_id || null } : {}),
       // Located products: the total is the sum of locations — change it per location instead.
       // Live, a stock change goes through ims_move_stock below so it's logged as an Adjustment.
       ...(isLocated(editingProduct) || supabaseConfigured ? {} : { stock_quantity: parseInt(editForm.stock_quantity) || 0 }),
@@ -675,8 +730,12 @@ export default function InventoryPage() {
     const loc = isLocated(p) ? locationId : null
     const avail = loc ? qtyAt(p, loc) : usableQty(p)
     if (qty <= 0) { setSampleError('Enter a quantity greater than 0.'); return }
+    if (!loc && qty > avail && blockedQty(p) > 0) {
+      setSampleError(`Only ${avail} unit${avail === 1 ? '' : 's'} can be sent out — ${blockedQty(p)} are in batches on hold or under recall.`)
+      return
+    }
     if (!loc && qty > avail && expiredQty(p) > 0) {
-      setSampleError(`Only ${avail} unexpired unit${avail === 1 ? '' : 's'} — the other ${expiredQty(p)} have expired and can't be sent out as samples.`)
+      setSampleError(`Only ${avail} unexpired unit${avail === 1 ? '' : 's'} — the other ${expiredQty(p)} have expired. To send expired units, use the gift icon on that batch in Batches & expiry.`)
       return
     }
     if (qty > avail) { setSampleError(`Only ${avail} unit${avail === 1 ? '' : 's'} in stock${loc ? ` at ${locationName(loc)}` : ''}.`); return }
@@ -686,7 +745,7 @@ export default function InventoryPage() {
       try {
         const newQty = await moveStock(createClient(), {
           productId: p.id, locationId: loc, delta: -qty, type: 'sample',
-          notes: 'Marked as sample product' + (loc ? ` (${locationName(loc)})` : ''),
+          notes: 'Marked as sample product' + (sampleTo.trim() ? ` — to ${sampleTo.trim()}` : '') + (loc ? ` (${locationName(loc)})` : ''),
           unitCost: p.unit_cost, sellingPrice: p.selling_price,
         })
         applyLocal(p.id, loc, newQty, -qty)
@@ -698,6 +757,7 @@ export default function InventoryPage() {
       applyLocal(p.id, null, p.stock_quantity - qty, -qty)
     }
     setSampleQty('1')
+    setSampleTo('')
   }
 
   // Apply the reorder-guidance suggested threshold to a product.
@@ -719,6 +779,10 @@ export default function InventoryPage() {
     const loc = isLocated(p) ? locationId : null
     const avail = loc ? qtyAt(p, loc) : usableQty(p)
     if (qty <= 0) { setSaleError('Enter a quantity greater than 0.'); return }
+    if (!loc && qty > avail && blockedQty(p) > 0) {
+      setSaleError(`Only ${avail} unit${avail === 1 ? '' : 's'} can be sold — ${blockedQty(p)} are in batches on hold or under recall.`)
+      return
+    }
     if (!loc && qty > avail && expiredQty(p) > 0) {
       setSaleError(`Only ${avail} unexpired unit${avail === 1 ? '' : 's'} — the other ${expiredQty(p)} have expired and can't be sold.`)
       return
@@ -730,7 +794,7 @@ export default function InventoryPage() {
       try {
         const newQty = await moveStock(createClient(), {
           productId: p.id, locationId: loc, delta: -qty, type: 'outbound',
-          notes: 'Sale recorded via Inventory' + (loc ? ` (${locationName(loc)})` : ''),
+          notes: 'Sale recorded via Inventory' + (saleTo.trim() ? ` — to ${saleTo.trim()}` : '') + (loc ? ` (${locationName(loc)})` : ''),
           unitCost: p.unit_cost, sellingPrice: p.selling_price,
         })
         applyLocal(p.id, loc, newQty, -qty)
@@ -742,6 +806,7 @@ export default function InventoryPage() {
       applyLocal(p.id, null, p.stock_quantity - qty, -qty)
     }
     setSaleQty('1')
+    setSaleTo('')
   }
 
   // Stock count for a located product at the selected location (sent on to Shopify).
@@ -765,15 +830,118 @@ export default function InventoryPage() {
     }
   }
 
+  // Assign-barcodes mode: products still missing a barcode come first (A→Z), then the rest.
+  const missingBarcode = useMemo(
+    () => products.filter(p => !p.barcode).sort((a, b) => a.name.localeCompare(b.name)),
+    [products],
+  )
+  const withBarcode = useMemo(
+    () => products.filter(p => p.barcode).sort((a, b) => a.name.localeCompare(b.name)),
+    [products],
+  )
+  const assignTarget = products.find(p => p.id === assignTargetId) ?? null
+  useEffect(() => {
+    if (scanPurpose === 'assign' && !assignTargetId && missingBarcode[0]) setAssignTargetId(missingBarcode[0].id)
+  }, [scanPurpose, assignTargetId, missingBarcode])
+
+  const setProductBarcode = async (productId: string, barcode: string | null) => {
+    if (supabaseConfigured) {
+      const { error } = await createClient().from('products').update({ barcode }).eq('id', productId)
+      if (error) {
+        if (error.code === '23505') throw new Error('That barcode is already on another product.')
+        throw new Error(error.message)
+      }
+    }
+    setProducts(prev => prev.map(p => p.id === productId ? { ...p, barcode: barcode ?? '' } : p))
+  }
+
+  const assignScannedBarcode = async (rawInput: string) => {
+    setBarcodeInput('')
+    if (!rawInput.trim() || assignBusy) return
+    const gs1 = parseGS1(rawInput)
+    if (gs1 && !gs1.gtin) { setScanFeedback({ type: 'error', msg: 'That label has no product number (01) — scan the product barcode instead.' }); return }
+    const code = gs1?.gtin ? storedBarcode(gs1.gtin) : rawInput.trim()
+    const target = assignTarget
+    if (!target) { setScanFeedback({ type: 'error', msg: 'Pick a product first.' }); return }
+    const owner = products.find(p => p.barcode && barcodeKey(p.barcode) === barcodeKey(code))
+    if (owner && owner.id === target.id) { setScanFeedback({ type: 'success', msg: `${target.name} already has this barcode.` }); return }
+    if (owner) { setScanFeedback({ type: 'error', msg: `Not saved — ${code} is already on "${owner.name}".` }); return }
+    setAssignBusy(true)
+    try {
+      await setProductBarcode(target.id, code)
+      setAssignLog(prev => [{ productId: target.id, name: target.name, barcode: code, prev: target.barcode || null }, ...prev])
+      const next = missingBarcode.find(p => p.id !== target.id)
+      setAssignTargetId(next?.id ?? '')
+      setScanFeedback({ type: 'success', msg: `Saved ${code} → ${target.name}${next ? `. Next: ${next.name}` : '. All products have a barcode now.'}` })
+    } catch (e) {
+      setScanFeedback({ type: 'error', msg: e instanceof Error ? e.message : 'Failed to save barcode' })
+    } finally {
+      setAssignBusy(false)
+      scanInputRef.current?.focus()
+    }
+  }
+
+  const undoAssign = async (entry: { productId: string; name: string; barcode: string; prev: string | null }) => {
+    try {
+      await setProductBarcode(entry.productId, entry.prev)
+      setAssignLog(prev => prev.filter(e => e !== entry))
+      setAssignTargetId(entry.productId)
+      setScanFeedback({ type: 'success', msg: `Undone — ${entry.name} is back to ${entry.prev ?? 'no barcode'}.` })
+    } catch (e) {
+      setScanFeedback({ type: 'error', msg: e instanceof Error ? e.message : 'Failed to undo' })
+    }
+    scanInputRef.current?.focus()
+  }
+
+  // One entry point for keyboard-wedge and camera scans. The camera keeps the callback it
+  // started with, so it goes through a ref to always see the current mode and products.
+  const dispatchScan = (code: string) => (scanPurpose === 'assign' ? assignScannedBarcode(code) : handleBarcodeScan(code))
+  const dispatchScanRef = useRef(dispatchScan)
+  dispatchScanRef.current = dispatchScan
+  // Scanners that press Enter after each GS1 field send "(01)…", "(11)…", "(10)…" as
+  // separate scans; join fields that arrive close together into one code.
+  const gs1PartsRef = useRef('')
+  const gs1TimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Some also skip the Enter after the last field, so whatever GS1 field is left in the
+  // box when the pause ends is taken too.
+  const flushGS1 = () => {
+    const tail = scanInputRef.current?.value ?? ''
+    const joined = gs1PartsRef.current + (isGS1Fragment(tail) ? tail.trim() : '')
+    gs1PartsRef.current = ''
+    if (isGS1Fragment(tail)) setBarcodeInput('')
+    dispatchScanRef.current(joined)
+  }
+  const armGS1Flush = () => {
+    if (gs1TimerRef.current) clearTimeout(gs1TimerRef.current)
+    gs1TimerRef.current = setTimeout(flushGS1, 400)
+  }
+  const onScanned = (code: string) => {
+    if (!isGS1Fragment(code) && !gs1PartsRef.current) { dispatchScan(code); return }
+    setBarcodeInput('')
+    gs1PartsRef.current += code.trim()
+    armGS1Flush()
+  }
+  const onScannedRef = useRef(onScanned)
+  onScannedRef.current = onScanned
+
   const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      handleBarcodeScan(barcodeInput)
+      e.preventDefault()
+      onScanned(barcodeInput)
     }
   }
 
   useEffect(() => {
     if (scanMode) scanInputRef.current?.focus()
   }, [scanMode])
+
+  // USB / Bluetooth scanner: catch scans wherever focus is (a click elsewhere used to make
+  // them vanish), with Enter, Tab or no end key. A scan with the panel closed opens it.
+  useWedgeScanner(code => {
+    setBarcodeInput('')
+    if (!scanMode) setScanMode(true)
+    onScannedRef.current(code)
+  }, true, scanInputRef)
 
   // Parse a whole CSV document into records of fields in a single pass.
   // Handles quoted fields that contain commas, embedded newlines and escaped
@@ -833,7 +1001,7 @@ export default function InventoryPage() {
       headers.forEach((h, j) => { row[h] = (vals[j] ?? '').trim() })
 
       const name = row.name || row.product_name || row.item_name || ''
-      const sku = row.sku || row.sku_code || ''
+      const sku = row.sku || row.sku_code || row.ibg_sku || row.germonizer_sku || ''
       if (!name) { errors.push(`Row ${i + 1}: missing product name`); continue }
       if (!sku) { errors.push(`Row ${i + 1}: missing SKU — ${name.length > 60 ? name.slice(0, 60) + '…' : name}`); continue }
 
@@ -843,7 +1011,9 @@ export default function InventoryPage() {
         name,
         sku,
         barcode: row.barcode || '',
-        brand: row.brand || '',
+        brand: row.brand || row.ibg_brand || row.germonizer_brand || '',
+        supplier_brand: row.supplier_brand || '',
+        supplier_sku: row['supplier_sku/model'] || row.supplier_sku || row.supplier_model || '',
         category: normalizeCategory(row.category || ''),
         description: row.description || '',
         batch_number: row.batch_number || row.batch_no || row.batch || '',
@@ -878,7 +1048,8 @@ export default function InventoryPage() {
       // a blank cell never wipes what's already saved.
       const updates: Partial<Product> = {}
       const text: [keyof Product, string][] = [
-        ['name', r.name ?? ''], ['barcode', row.barcode], ['brand', row.brand], ['description', row.description],
+        ['name', r.name ?? ''], ['barcode', row.barcode], ['brand', r.brand ?? ''], ['description', row.description],
+        ['supplier_brand', r.supplier_brand ?? ''], ['supplier_sku', r.supplier_sku ?? ''],
         // With batches the file's batch/expiry describe the delivery, not the product.
         ...(batchesOn ? [] : [['batch_number', r.batch_number ?? ''], ['expiry_date', r.expiry_date ?? '']] as [keyof Product, string][]),
         ['category', row.category ? (r.category ?? '') : ''],
@@ -933,8 +1104,8 @@ export default function InventoryPage() {
   }
 
   function downloadCsvTemplate() {
-    const header = 'name,sku,barcode,brand,category,description,batch_number,expiry_date,unit_cost,selling_price,reorder_level,stock_quantity'
-    const sample = 'Sample Product,SKU-001,8901234567890,Sample Brand,General,Sample product description,BN2025-001,2027-12-31,85,120,500,1000'
+    const header = 'name,sku,barcode,brand,supplier_brand,supplier_sku,category,description,batch_number,expiry_date,unit_cost,selling_price,reorder_level,stock_quantity'
+    const sample = 'Sample Product,SKU-001,8901234567890,Sample Brand,Supplier Brand,SUP-001,General,Sample product description,BN2025-001,2027-12-31,85,120,500,1000'
     const blob = new Blob([header + '\n' + sample], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = 'ibg-products-template.csv'; a.click()
@@ -979,8 +1150,8 @@ export default function InventoryPage() {
           {canExport(role) && (
             <button className="btn-secondary btn-sm" onClick={() => {
               const rows = [
-                ['Name','SKU','Barcode','Brand','Category','Description','Batch Number','Expiry Date','Unit Cost','Selling Price','Reorder Level','Stock Quantity'],
-                ...products.map(p => [p.name,p.sku,p.barcode,p.brand,p.category,p.description,p.batch_number,p.expiry_date,String(p.unit_cost),String(p.selling_price),String(p.reorder_level),String(p.stock_quantity)])
+                ['Name','I-BG SKU','Barcode','I-BG Brand','Supplier Brand','Supplier SKU/Model','Category','Description','Batch Number','Expiry Date','Unit Cost','Selling Price','Reorder Level','Stock Quantity', ...(bins ? ['Storage Location'] : [])],
+                ...products.map(p => [p.name,p.sku,p.barcode,p.brand,p.supplier_brand ?? '',p.supplier_sku ?? '',p.category,p.description,p.batch_number,p.expiry_date,String(p.unit_cost),String(p.selling_price),String(p.reorder_level),String(p.stock_quantity), ...(bins ? [binCodesOf(p).join(' / ')] : [])])
               ]
               const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')
               const blob = new Blob([csv], { type: 'text/csv' })
@@ -1056,28 +1227,83 @@ export default function InventoryPage() {
                 <Scan size={18} style={{ color: '#2FA6B8' }} />
                 <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>Barcode Scanner</h3>
                 <span className="badge badge-info" style={{ fontSize: 11 }}>Active</span>
+                <div style={{ marginLeft: 'auto', display: 'inline-flex', border: '1px solid #E2E8F0', borderRadius: 999, padding: 2 }}>
+                  {([['stock', 'Stock movements'], ['assign', `Assign barcodes${missingBarcode.length ? ` (${missingBarcode.length} missing)` : ''}`]] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => { setScanPurpose(v); setScanFeedback({ type: null, msg: '' }); scanInputRef.current?.focus() }}
+                      style={{
+                        padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                        background: scanPurpose === v ? '#2FA6B8' : 'transparent', color: scanPurpose === v ? 'white' : '#64748B',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <p style={{ fontSize: 13, color: '#64748B', marginBottom: 12 }}>
-                Focus the field below and scan with a USB barcode scanner, or type a barcode/SKU and press Enter.
+                {scanPurpose === 'assign'
+                  ? 'Pick the product in your hand, then scan its box. The barcode is saved straight away and the next product without a barcode comes up.'
+                  : 'Focus the field below and scan with a USB barcode scanner, or type a barcode/SKU and press Enter.'}
               </p>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <div style={{ position: 'relative', flex: 1 }}>
+              {scanPurpose === 'assign' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontSize: 13, color: '#374151' }}>
+                  Product
+                  <select
+                    className="input-field"
+                    style={{ flex: 1 }}
+                    value={assignTargetId}
+                    onChange={e => { setAssignTargetId(e.target.value); scanInputRef.current?.focus() }}
+                  >
+                    <option value="">— Pick a product —</option>
+                    {missingBarcode.length > 0 && (
+                      <optgroup label="Needs a barcode">
+                        {missingBarcode.map(p => <option key={p.id} value={p.id}>{p.name}{p.sku ? ` · ${p.sku}` : ''}</option>)}
+                      </optgroup>
+                    )}
+                    {withBarcode.length > 0 && (
+                      <optgroup label="Already has one (scan to replace)">
+                        {withBarcode.map(p => <option key={p.id} value={p.id}>{p.name}{p.sku ? ` · ${p.sku}` : ''} — {p.barcode}</option>)}
+                      </optgroup>
+                    )}
+                  </select>
+                  {assignTarget && missingBarcode.some(p => p.id !== assignTarget.id) && (
+                    <button
+                      className="btn-secondary btn-sm"
+                      onClick={() => {
+                        const i = missingBarcode.findIndex(p => p.id === assignTarget.id)
+                        const rest = missingBarcode.filter(p => p.id !== assignTarget.id)
+                        setAssignTargetId((missingBarcode[i + 1] ?? rest[0]).id)
+                        scanInputRef.current?.focus()
+                      }}
+                    >
+                      Skip
+                    </button>
+                  )}
+                </label>
+              )}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: '1 1 220px' }}>
                   <Scan size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
                   <input
                     ref={scanInputRef}
                     className="input-field"
                     style={{ paddingLeft: 36 }}
-                    placeholder="Scan or type barcode / SKU..."
+                    placeholder={scanPurpose === 'assign'
+                      ? (assignTarget ? `Scan the barcode for ${assignTarget.name}...` : 'Pick a product first...')
+                      : 'Scan or type barcode / SKU...'}
                     value={barcodeInput}
-                    onChange={e => setBarcodeInput(e.target.value)}
+                    onChange={e => { setBarcodeInput(e.target.value); if (gs1PartsRef.current) armGS1Flush() }}
                     onKeyDown={handleScanKeyDown}
                     autoFocus
                   />
                 </div>
-                <button className="btn-primary btn-sm" onClick={() => handleBarcodeScan(barcodeInput)}>
+                <button className="btn-primary btn-sm" disabled={assignBusy} onClick={() => onScanned(barcodeInput)}>
                   <Scan size={14} />
-                  Scan
+                  {scanPurpose === 'assign' ? 'Save' : 'Scan'}
                 </button>
+                <PhotoScanButton onScan={code => { setBarcodeInput(''); onScannedRef.current(code) }} />
               </div>
               {scanFeedback.type && (
                 <div style={{
@@ -1095,12 +1321,45 @@ export default function InventoryPage() {
               )}
             </div>
 
-            {/* Scanned Items Panel */}
-            {scannedItems.length > 0 && (
+            {/* Barcodes assigned this session (undo-able) */}
+            {scanPurpose === 'assign' && assignLog.length > 0 && (
               <div style={{ width: 340, borderLeft: '1px solid #E2E8F0', paddingLeft: 16 }}>
                 <h4 style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>
-                  Scanned Items ({scannedItems.length})
+                  Barcodes saved ({assignLog.length})
                 </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+                  {assignLog.map(entry => (
+                    <div key={`${entry.productId}-${entry.barcode}`} style={{
+                      padding: '8px 12px', borderRadius: 10, background: '#F0FDF4', border: '1px solid #BBF7D0',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                    }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{entry.name}</div>
+                        <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'monospace' }}>{entry.barcode}</div>
+                      </div>
+                      <button className="btn-secondary btn-sm" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => undoAssign(entry)}>
+                        Undo
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Scanned Items Panel */}
+            {scanPurpose === 'stock' && scannedItems.length > 0 && (
+              <div style={{ width: 340, borderLeft: '1px solid #E2E8F0', paddingLeft: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
+                    Scanned Items ({scannedItems.length})
+                  </h4>
+                  <button
+                    onClick={() => { setScannedItems([]); setScanFeedback({ type: null, msg: '' }); scanInputRef.current?.focus() }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#64748B' }}
+                  >
+                    Clear all
+                  </button>
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
                   {scannedItems.map(item => (
                     <div key={item.id} style={{
@@ -1144,6 +1403,14 @@ export default function InventoryPage() {
                             />
                           </div>
                         )}
+                        <button
+                          title="Remove this scan"
+                          aria-label="Remove this scan"
+                          onClick={() => { setScannedItems(prev => prev.filter(i => i.id !== item.id)); scanInputRef.current?.focus() }}
+                          style={{ marginLeft: 6, padding: 3, border: 'none', background: 'transparent', cursor: 'pointer', color: '#94A3B8', display: 'flex', flexShrink: 0 }}
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                       {item.found && item.action === 'receive' && batchesOn && (
                         <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
@@ -1271,7 +1538,7 @@ export default function InventoryPage() {
                 {section.title && (
                   <tr style={{ background: '#ECFEFF', borderTop: '1px solid #A5F3FC', borderBottom: '1px solid #A5F3FC' }}>
                     <td colSpan={6} style={{ padding: '8px 16px', fontSize: 12, fontWeight: 700, color: '#155E75' }}>
-                      {section.title} <span style={{ fontWeight: 500, color: '#1E7A8A' }}>· {section.items.length}</span>
+                      {section.title} <span style={{ fontWeight: 500, color: '#1E7A8A' }}>· {categoryTotals.get(section.title) ?? section.items.length}</span>
                     </td>
                   </tr>
                 )}
@@ -1321,6 +1588,17 @@ export default function InventoryPage() {
                         <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
                           <span style={{ fontFamily: 'monospace', color: '#64748B' }}>{p.sku}</span>
                           {p.brand && <> · {p.brand}</>}
+                          {bins && (() => {
+                            const codes = binCodesOf(p)
+                            return codes.length
+                              ? <span title="Storage location" style={{ marginLeft: 6, color: '#0369A1', fontFamily: 'monospace' }}>📍 {codes.join(', ')}</span>
+                              : p.stock_quantity > 0 && bins.length > 0 ? <span style={{ marginLeft: 6, color: '#DC2626' }}>· no location</span> : null
+                          })()}
+                          {(p.supplier_brand || p.supplier_sku) && (
+                            <div title="Supplier brand · Supplier SKU/model">
+                              Supplier: {[p.supplier_brand, p.supplier_sku].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
                           {dupCount > 0 && <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#F3E8FF', color: '#7C3AED' }} title="Same name or barcode as another product — open it to merge">Duplicate?</span>}
                         </div>
                       </div>
@@ -1444,6 +1722,7 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
+        {pager}
       </div>
 
       {/* Recent Scans (if any) */}
@@ -1532,10 +1811,13 @@ export default function InventoryPage() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {[
-                  { label: 'SKU', value: showDetailModal.sku },
+                  { label: 'I-BG SKU', value: showDetailModal.sku },
+                  { label: 'I-BG Brand', value: showDetailModal.brand },
+                  { label: 'Supplier SKU / Model', value: showDetailModal.supplier_sku },
+                  { label: 'Supplier Brand', value: showDetailModal.supplier_brand },
                   { label: 'Barcode', value: showDetailModal.barcode },
-                  { label: 'Brand', value: showDetailModal.brand },
                   { label: 'Category', value: showDetailModal.category },
+                  ...(bins ? [{ label: 'Storage Location', value: binCodesOf(showDetailModal).join(', ') || 'Not set' }] : []),
                   ...(batchesOn ? [] : [
                     { label: 'Batch Number', value: showDetailModal.batch_number },
                     { label: 'Expiry Date', value: formatDate(showDetailModal.expiry_date) },
@@ -1562,11 +1844,14 @@ export default function InventoryPage() {
                   product={showDetailModal}
                   batches={batchesByProduct.get(showDetailModal.id) ?? []}
                   editable={canEdit(role)}
+                  canHold={role === 'administrator' || role === 'inventory_manager' || role === 'staff'}
+                  canRelease={canReleaseBatches}
                   locationId={isLocated(showDetailModal) ? locationId : null}
                   locationLabel={locationName(locationId)}
                   expiryBadge={expiryBadge}
                   onStockMoved={(qty, delta) => applyLocal(showDetailModal.id, isLocated(showDetailModal) ? locationId : null, qty, delta)}
                   onChanged={reloadBatches}
+                  bins={bins}
                 />
               )}
               {batchesOn && canEdit(role) && !isLocated(showDetailModal) && (
@@ -1678,6 +1963,8 @@ export default function InventoryPage() {
                       <TrendingUp size={13} /> Record Sale
                     </button>
                   </div>
+                  <input className="input-field" style={{ marginTop: 8 }} placeholder="Customer (optional — lets a batch recall reach them)"
+                    value={saleTo} onChange={e => setSaleTo(e.target.value)} />
                   {saleError && (
                     <div style={{ marginTop: 8, fontSize: 12, color: '#991B1B' }}>{saleError}</div>
                   )}
@@ -1689,7 +1976,7 @@ export default function InventoryPage() {
                     <Gift size={13} /> Mark as Sample
                   </div>
                   <p style={{ fontSize: 12, color: '#64748B', marginBottom: 10 }}>
-                    Give out units as a free sample — reduces stock and logs a &quot;Sample&quot; movement, separate from sales. Expired units are never used.
+                    Give out units as a free sample — reduces stock and logs a &quot;Sample&quot; movement, separate from sales. Expired units aren&apos;t used here — to give out expired units, use the gift icon on that batch in Batches &amp; expiry above.
                   </p>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input
@@ -1708,6 +1995,8 @@ export default function InventoryPage() {
                       <Gift size={13} /> Mark as Sample
                     </button>
                   </div>
+                  <input className="input-field" style={{ marginTop: 8 }} placeholder="Given to (optional — lets a batch recall reach them)"
+                    value={sampleTo} onChange={e => setSampleTo(e.target.value)} />
                   {sampleError && (
                     <div style={{ marginTop: 8, fontSize: 12, color: '#991B1B' }}>{sampleError}</div>
                   )}
@@ -1756,9 +2045,11 @@ export default function InventoryPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 {([
                   { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text', required: true },
-                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text', required: true },
+                  { label: 'I-BG SKU', key: 'sku', placeholder: 'e.g. SKU-001', type: 'text', required: true },
+                  { label: 'I-BG Brand', key: 'brand', placeholder: 'e.g. Brand name', type: 'text', required: false },
+                  { label: 'Supplier SKU / Model', key: 'supplier_sku', placeholder: 'e.g. DETO-803', type: 'text', required: false },
+                  { label: 'Supplier Brand', key: 'supplier_brand', placeholder: 'e.g. AllTest', type: 'text', required: false },
                   { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text', required: false },
-                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text', required: false },
                   { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text', required: false },
                   { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date', required: false },
                   { label: 'Unit Cost', key: 'unit_cost', placeholder: '0.00', type: 'number', required: false },
@@ -1836,6 +2127,7 @@ export default function InventoryPage() {
                       sku: addForm.sku.trim(),
                       barcode: addForm.barcode.trim() || null,
                       brand: addForm.brand.trim(),
+                      ...supplierFields(addForm),
                       category: normalizeCategory(addForm.category),
                       description: addForm.description.trim(),
                       batch_number: addForm.batch_number.trim(),
@@ -1865,7 +2157,7 @@ export default function InventoryPage() {
                       }
                       setProducts(prev => [newProduct, ...prev])
                     }
-                    setAddForm({ name: '', sku: '', barcode: '', brand: '', batch_number: '', expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '', stock_quantity: '', category: 'General', description: '', currency: getBaseCurrency() })
+                    setAddForm({ name: '', sku: '', barcode: '', brand: '', supplier_brand: '', supplier_sku: '', batch_number: '', expiry_date: '', unit_cost: '', selling_price: '', reorder_level: '', stock_quantity: '', category: 'General', description: '', currency: getBaseCurrency() })
                     setShowAddModal(false)
                   }}
                 >
@@ -1891,9 +2183,11 @@ export default function InventoryPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 {([
                   { label: 'Product Name', key: 'name', placeholder: 'e.g. N95 Respirator Mask', type: 'text', required: true },
-                  { label: 'SKU', key: 'sku', placeholder: 'e.g. MED-N95-001', type: 'text', required: true },
+                  { label: 'I-BG SKU', key: 'sku', placeholder: 'e.g. SKU-001', type: 'text', required: true },
+                  { label: 'I-BG Brand', key: 'brand', placeholder: 'e.g. Brand name', type: 'text', required: false },
+                  { label: 'Supplier SKU / Model', key: 'supplier_sku', placeholder: 'e.g. DETO-803', type: 'text', required: false },
+                  { label: 'Supplier Brand', key: 'supplier_brand', placeholder: 'e.g. AllTest', type: 'text', required: false },
                   { label: 'Barcode', key: 'barcode', placeholder: 'e.g. 8901234567890', type: 'text', required: false },
-                  { label: 'Brand', key: 'brand', placeholder: 'e.g. SafeGuard', type: 'text', required: false },
                   { label: 'Batch Number', key: 'batch_number', placeholder: 'e.g. BN2025-001', type: 'text', required: false },
                   { label: 'Expiry Date', key: 'expiry_date', placeholder: '', type: 'date', required: false },
                   { label: 'Unit Cost (Buying Price)', key: 'unit_cost', placeholder: '0.00', type: 'number', required: false },
@@ -1932,6 +2226,18 @@ export default function InventoryPage() {
                   {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code} ({c.symbol.trim()}) — {c.name}</option>)}
                 </select>
               </div>
+              {bins && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Storage location (default)</label>
+                  <select className="input-field" style={{ fontFamily: 'monospace' }} value={editForm.bin_id} onChange={e => setEditForm(f => ({ ...f, bin_id: e.target.value }))}>
+                    <option value="">— Not set —</option>
+                    {bins.filter(b => b.active || b.id === editForm.bin_id).sort((a, b) => compareBinCodes(a.code, b.code)).map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
+                  </select>
+                  <p style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
+                    {bins.length ? 'Where this product is normally kept. New batches start here; move a batch in the product details.' : 'No locations yet — create them under Storage Locations.'}
+                  </p>
+                </div>
+              )}
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Category</label>
                 <select
@@ -2091,7 +2397,7 @@ export default function InventoryPage() {
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                         <thead>
                           <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                            {['Name', 'SKU', 'Category', 'Brand', 'Stock', 'Unit Cost', 'Expiry'].map(col => (
+                            {['Name', 'SKU', 'Category', 'Brand', 'Supplier', 'Stock', 'Unit Cost', 'Expiry'].map(col => (
                               <th key={col} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{col}</th>
                             ))}
                           </tr>
@@ -2105,6 +2411,7 @@ export default function InventoryPage() {
                                 <span className={`badge ${categoryBadgeClass(r.category ?? '')}`}>{r.category}</span>
                               </td>
                               <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.brand || '—'}</td>
+                              <td style={{ padding: '10px 12px', color: '#64748B' }}>{[r.supplier_brand, r.supplier_sku].filter(Boolean).join(' · ') || '—'}</td>
                               <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0F172A' }}>{r.stock_quantity ?? 0}</td>
                               <td style={{ padding: '10px 12px', color: '#374151' }}>{r.unit_cost ? formatCurrency(r.unit_cost) : '—'}</td>
                               <td style={{ padding: '10px 12px', color: '#64748B' }}>{r.expiry_date ? formatDate(r.expiry_date) : '—'}</td>
@@ -2140,6 +2447,7 @@ export default function InventoryPage() {
                       if (csvRows.length > 0) {
                         const payload = csvRows.map(r => ({
                           name: r.name, sku: r.sku, barcode: r.barcode || null, brand: r.brand,
+                          ...supplierFields({ supplier_brand: r.supplier_brand ?? '', supplier_sku: r.supplier_sku ?? '' }),
                           category: r.category, description: r.description, batch_number: r.batch_number,
                           expiry_date: r.expiry_date || null, unit_cost: r.unit_cost,
                           selling_price: r.selling_price, reorder_level: r.reorder_level,
@@ -2247,7 +2555,7 @@ export default function InventoryPage() {
       {showCamera && (
         <CameraScanner
           onScan={(barcode) => {
-            handleBarcodeScan(barcode)
+            onScannedRef.current(barcode)
             // Keep camera open so user can scan multiple items
             if (!scanMode) setScanMode(true)
           }}

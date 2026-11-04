@@ -1,13 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Search, Bell, ChevronDown,
-  AlertTriangle, CheckCircle, Info, LogOut,
+  AlertTriangle, CheckCircle, Info, LogOut, FileText,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { mockAlerts } from '@/lib/mock-data'
+import { createClient } from '@/lib/supabase/client'
+import type { AppNotification } from '@/types'
 
 const roleLabels: Record<string, string> = {
   administrator: 'Administrator',
@@ -17,7 +19,7 @@ const roleLabels: Record<string, string> = {
 }
 
 export default function Header() {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, isMockMode } = useAuth()
   const [signingOut, setSigningOut] = useState(false)
   const router = useRouter()
   const [profileOpen, setProfileOpen] = useState(false)
@@ -27,7 +29,40 @@ export default function Header() {
   const displayRole = profile?.role ? roleLabels[profile.role] : ''
   const displayInitial = displayName.charAt(0).toUpperCase()
 
-  const unreadCount = mockAlerts.filter(a => a.status === 'unread').length
+  // Live: the signed-in user's own notifications (forms assigned / to approve / remarks…).
+  // null = table not there yet (before the 2026-10-22 forms migration) → sample alerts.
+  const [notes, setNotes] = useState<AppNotification[] | null>(null)
+  const userId = profile?.id
+  const loadNotes = useCallback(async () => {
+    if (isMockMode || !userId) return
+    const { data, error } = await createClient().from('notifications')
+      .select('id, user_id, title, body, link, read_at, created_at')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(30)
+    if (!error) setNotes(data as AppNotification[])
+  }, [isMockMode, userId])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch, then poll
+    loadNotes()
+    const t = setInterval(loadNotes, 60_000)
+    return () => clearInterval(t)
+  }, [loadNotes])
+  const openNote = async (n: AppNotification) => {
+    setNotifOpen(false)
+    if (!n.read_at) {
+      setNotes(prev => prev?.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x) ?? prev)
+      await createClient().from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id)
+    }
+    if (n.link) router.push(n.link)
+  }
+  const markAllRead = async () => {
+    const unread = (notes ?? []).filter(n => !n.read_at).map(n => n.id)
+    if (!unread.length) return
+    const now = new Date().toISOString()
+    setNotes(prev => prev?.map(x => x.read_at ? x : { ...x, read_at: now }) ?? prev)
+    await createClient().from('notifications').update({ read_at: now }).in('id', unread)
+  }
+
+  const unreadCount = notes ? notes.filter(n => !n.read_at).length : mockAlerts.filter(a => a.status === 'unread').length
 
   const alertIcon = (type: string) => {
     if (type === 'out_of_stock' || type === 'low_stock') return <AlertTriangle size={14} style={{ color: '#F59E0B', flexShrink: 0 }} />
@@ -64,7 +99,7 @@ export default function Header() {
             cursor: 'pointer', padding: 8, borderRadius: 8,
             color: '#64748B', transition: 'background 0.15s',
           }}
-          onClick={() => { setNotifOpen(!notifOpen); setProfileOpen(false) }}
+          onClick={() => { setNotifOpen(!notifOpen); setProfileOpen(false); if (!notifOpen) loadNotes() }}
           onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')}
           onMouseLeave={e => (e.currentTarget.style.background = 'none')}
         >
@@ -95,15 +130,42 @@ export default function Header() {
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
                   Notifications {unreadCount > 0 && <span style={{ background: '#EF4444', color: 'white', borderRadius: 999, fontSize: 10, padding: '1px 6px', marginLeft: 6 }}>{unreadCount}</span>}
                 </div>
-                <button
-                  onClick={() => { setNotifOpen(false); router.push('/alerts') }}
-                  style={{ background: 'none', border: 'none', fontSize: 12, color: '#2FA6B8', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  View all
-                </button>
+                {notes ? (
+                  <button onClick={markAllRead} disabled={!unreadCount}
+                    style={{ background: 'none', border: 'none', fontSize: 12, color: unreadCount ? '#2FA6B8' : '#CBD5E1', cursor: unreadCount ? 'pointer' : 'default', fontWeight: 600 }}>
+                    Mark all read
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { setNotifOpen(false); router.push('/alerts') }}
+                    style={{ background: 'none', border: 'none', fontSize: 12, color: '#2FA6B8', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    View all
+                  </button>
+                )}
               </div>
               <div style={{ overflowY: 'auto', maxHeight: 340 }}>
-                {mockAlerts.length === 0 ? (
+                {notes ? (notes.length === 0 ? (
+                  <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+                    <CheckCircle size={24} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
+                    You&rsquo;re all caught up
+                  </div>
+                ) : notes.map(n => (
+                  <div key={n.id} onClick={() => openNote(n)}
+                    style={{ padding: '10px 16px', borderBottom: '1px solid #F8FAFC', background: n.read_at ? 'white' : '#FAFCFF', cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'flex-start' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                    onMouseLeave={e => (e.currentTarget.style.background = n.read_at ? 'white' : '#FAFCFF')}>
+                    <FileText size={14} style={{ color: '#2FA6B8', flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: '#0F172A', fontWeight: n.read_at ? 500 : 700 }}>{n.title}</div>
+                      {n.body && <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.4, marginTop: 2 }}>{n.body}</div>}
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>
+                        {new Date(n.created_at).toLocaleString('en-SG', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    {!n.read_at && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#2FA6B8', flexShrink: 0, marginTop: 5 }} />}
+                  </div>
+                ))) : mockAlerts.length === 0 ? (
                   <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
                     <CheckCircle size={24} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
                     No notifications

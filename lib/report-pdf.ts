@@ -25,6 +25,17 @@ export type ReportRow = {
   expiryStatus: string
 }
 
+export type ActivityRow = {
+  name: string
+  sku: string
+  sold: number
+  revenue: number   // home currency
+  profit: number    // home currency
+  samples: number
+  received: number
+  movements: number
+}
+
 export function buildInventoryReportHtml(opts: {
   companyName: string
   location: string
@@ -32,6 +43,11 @@ export function buildInventoryReportHtml(opts: {
   logoUrl: string
   iconUrl: string
   watermarkText?: string
+  /** Report period (applies to sales/movements), e.g. "This month (1 Oct – 31 Oct 2026)". */
+  periodLabel?: string
+  /** Product / category / type filters in effect, if any. */
+  scopeLabel?: string
+  activity?: ActivityRow[]
   kpis: { label: string; value: string; sub: string }[]
   stockStatus: { name: string; value: number }[]
   expiryRisk: { name: string; value: number }[]
@@ -39,7 +55,7 @@ export function buildInventoryReportHtml(opts: {
   rows: ReportRow[]
   autoPrint: boolean
 }): string {
-  const { companyName, location, baseCurrency, logoUrl, iconUrl, watermarkText = 'I-BG CT Asia · Confidential', kpis, stockStatus, expiryRisk, txVolume, rows, autoPrint } = opts
+  const { companyName, location, baseCurrency, logoUrl, iconUrl, watermarkText = 'I-BG CT Asia · Confidential', periodLabel = 'All time', scopeLabel = '', activity = [], kpis, stockStatus, expiryRisk, txVolume, rows, autoPrint } = opts
   const money = (n: number) => formatMoney(n, baseCurrency)
   const generated = new Date().toLocaleString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
   const top = rows.filter(r => r.valueBase > 0).slice(0, 8)
@@ -139,6 +155,7 @@ export function buildInventoryReportHtml(opts: {
     </div>
     <div class="doc-title">
       <h1>Inventory Report</h1>
+      <div>Period: <b>${esc(periodLabel)}</b>${scopeLabel ? ` · ${esc(scopeLabel)}` : ''}</div>
       <div>Generated ${esc(generated)} · Amounts in ${esc(baseCurrency)}</div>
     </div>
   </div>
@@ -158,7 +175,44 @@ export function buildInventoryReportHtml(opts: {
     </div>
   </div>
 
-  <h2>Full stock report · ${rows.length.toLocaleString()} products</h2>
+  ${activity.length ? `
+  <h2>Sales &amp; movements by product · ${esc(periodLabel)}</h2>
+  <table style="margin-bottom:18px">
+    <thead>
+      <tr>
+        <th class="num">#</th><th>Product</th><th>SKU</th><th class="num">Units sold</th>
+        <th class="num">Revenue (${esc(baseCurrency)})</th><th class="num">Profit (${esc(baseCurrency)})</th>
+        <th class="num">Samples</th><th class="num">Received</th><th class="num">Movements</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${activity.map((r, i) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td>${esc(r.name)}</td>
+        <td class="mono">${esc(r.sku)}</td>
+        <td class="num">${r.sold.toLocaleString()}</td>
+        <td class="num">${esc(money(r.revenue))}</td>
+        <td class="num${r.profit < 0 ? ' neg' : ''}">${esc(money(r.profit))}</td>
+        <td class="num">${r.samples.toLocaleString()}</td>
+        <td class="num">${r.received.toLocaleString()}</td>
+        <td class="num">${r.movements.toLocaleString()}</td>
+      </tr>`).join('')}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3">Total</td>
+        <td class="num">${activity.reduce((s, r) => s + r.sold, 0).toLocaleString()}</td>
+        <td class="num">${esc(money(activity.reduce((s, r) => s + r.revenue, 0)))}</td>
+        <td class="num">${esc(money(activity.reduce((s, r) => s + r.profit, 0)))}</td>
+        <td class="num">${activity.reduce((s, r) => s + r.samples, 0).toLocaleString()}</td>
+        <td class="num">${activity.reduce((s, r) => s + r.received, 0).toLocaleString()}</td>
+        <td class="num">${activity.reduce((s, r) => s + r.movements, 0).toLocaleString()}</td>
+      </tr>
+    </tfoot>
+  </table>` : `<div class="note" style="margin-bottom:14px">No sales or movements in ${esc(periodLabel)}.</div>`}
+
+  <h2>Full stock report (as of today) · ${rows.length.toLocaleString()} products</h2>
   <table>
     <thead>
       <tr>

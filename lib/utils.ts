@@ -4,21 +4,23 @@ export function cn(...classes: (string | undefined | false | null)[]) {
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-let _currencySymbol: string | null = null
+let _currencyCode: string | null = null
 
+// Amounts always carry the ISO currency code ("SGD 1,234.00"), never a bare symbol —
+// "$" alone is ambiguous between SGD and USD on ISO / customer-facing records.
 export function formatCurrency(amount: number): string {
-  if (_currencySymbol === null) {
-    _currencySymbol = 'S$'
+  if (_currencyCode === null) {
+    _currencyCode = 'SGD'
     if (typeof window !== 'undefined') {
       try {
         const s = JSON.parse(localStorage.getItem('ibg_settings') ?? '{}')
-        const m = (s.currency ?? '').match(/\(([^)]+)\)/)
-        if (m) _currencySymbol = m[1]
+        const m = String(s.currency ?? '').trim().slice(0, 3).toUpperCase()
+        if (/^[A-Z]{3}$/.test(m)) _currencyCode = m
       } catch { /* use default */ }
     }
   }
   const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return (amount < 0 ? '-' : '') + _currencySymbol + abs
+  return (amount < 0 ? '-' : '') + _currencyCode + ' ' + abs
 }
 
 export function formatDate(dateStr: string): string {

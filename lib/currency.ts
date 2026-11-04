@@ -37,10 +37,11 @@ export function currencySymbol(code: string): string {
   return CURRENCIES.find(c => c.code === code)?.symbol ?? `${code} `
 }
 
-/** Format an amount in a specific currency, e.g. formatMoney(12.5, 'PHP') → "₱12.50". */
+/** Format an amount with its ISO code, e.g. formatMoney(12.5, 'USD') → "USD 12.50".
+ *  Codes, not symbols: "$" can't tell SGD from USD on a PO or invoice. */
 export function formatMoney(amount: number, code: string): string {
   const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return (amount < 0 ? '-' : '') + currencySymbol(code) + abs
+  return (amount < 0 ? '-' : '') + code + ' ' + abs
 }
 
 /** Units of each currency per 1 unit of the home currency. */

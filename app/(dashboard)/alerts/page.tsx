@@ -7,6 +7,7 @@ import { formatDateTime } from '@/lib/utils'
 import type { Alert, AlertType } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { isExpiredAlertMessage } from '@/lib/generate-alerts'
+import { usePaged, PAGE_SIZE } from '@/components/ui/Pager'
 
 const supabaseConfigured = (() => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -55,6 +56,8 @@ export default function AlertsPage() {
     const matchStatus = statusFilter === 'All' || a.status === statusFilter
     return matchType && matchStatus
   })
+
+  const { pageRows, pager } = usePaged(filtered, `${typeFilter}|${statusFilter}`)
 
   const unreadCount = alerts.filter(a => a.status === 'unread').length
 
@@ -163,7 +166,7 @@ export default function AlertsPage() {
             <div style={{ fontSize: 14 }}>No alerts match your filters.</div>
           </div>
         )}
-        {filtered.map(alert => {
+        {pageRows.map(alert => {
           const expired = alert.type === 'expiring_product' && isExpiredAlertMessage(alert.message)
           const cfg = alert.type === 'expiring_product'
             ? (expired
@@ -239,6 +242,7 @@ export default function AlertsPage() {
             </div>
           )
         })}
+        {filtered.length > PAGE_SIZE && <div className="card" style={{ overflow: 'hidden' }}>{pager}</div>}
       </div>
     </div>
   )
