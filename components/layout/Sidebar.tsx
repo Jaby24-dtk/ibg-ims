@@ -3,20 +3,27 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
+import { useEffect } from 'react'
 import {
-  LayoutDashboard, Package, ArrowLeftRight, ShoppingCart,
-  Bell, BarChart2, Settings, ChevronRight,
+  LayoutDashboard, Package, ArrowLeftRight, FileText,
+  Bell, BarChart2, Settings, ChevronRight, MapPin, Contact, ClipboardCheck, ShieldAlert, ShieldCheck,
 } from 'lucide-react'
 import { mockAlerts } from '@/lib/mock-data'
 import { useRole } from '@/lib/use-role'
+import { generateDueCounts } from '@/lib/counts'
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/inventory', icon: Package, label: 'Inventory' },
+  { href: '/locations', icon: MapPin, label: 'Storage Locations' },
   { href: '/stock-movements', icon: ArrowLeftRight, label: 'Stock Movements' },
-  { href: '/purchase-orders', icon: ShoppingCart, label: 'Purchase Orders' },
+  { href: '/cycle-counts', icon: ClipboardCheck, label: 'Cycle Counts' },
+  { href: '/traceability', icon: ShieldAlert, label: 'Traceability & Recalls' },
+  { href: '/forms', icon: FileText, label: 'Forms & Approvals' },
+  { href: '/contacts', icon: Contact, label: 'Suppliers & Customers' },
   { href: '/alerts', icon: Bell, label: 'Alerts & Notifications' },
   { href: '/reports', icon: BarChart2, label: 'Reports & Analytics' },
+  { href: '/audit', icon: ShieldCheck, label: 'Audit & Compliance' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ]
 
@@ -25,6 +32,17 @@ export default function Sidebar() {
   const role = useRole()
   const unreadAlerts = mockAlerts.filter(a => a.status === 'unread').length
   const isAdmin = role === 'administrator'
+  // Scheduled stock counts are created when they fall due — checked once per visit (no cron).
+  useEffect(() => {
+    if (!role || role === 'viewer') return
+    import('@/lib/supabase/client').then(({ createClient }) => generateDueCounts(createClient())).catch(() => {})
+    // SOP-008 reminders (adverse-event, HSA and consignee follow-up deadlines) — same once-per-visit check.
+    import('@/lib/supabase/client').then(async ({ createClient }) => {
+      const { data, error } = await createClient().rpc('quality_reminders')
+      if (!error && data) fetch('/api/notifications/send', { method: 'POST' }).catch(() => {})
+    }).catch(() => {})
+  }, [role])
+  const items = navItems
 
   return (
     <aside
@@ -54,7 +72,7 @@ export default function Sidebar() {
           </span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
-          {navItems.filter(item => item.href !== '/settings' || isAdmin).map(({ href, icon: Icon, label }) => {
+          {items.filter(item => item.href !== '/settings' || isAdmin).map(({ href, icon: Icon, label }) => {
             const active = pathname === href || pathname.startsWith(href + '/')
             return (
               <Link key={href} href={href} style={{

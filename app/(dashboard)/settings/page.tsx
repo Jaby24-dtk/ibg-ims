@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Settings, User, Bell, Database, Save, Plus, Trash2, X, Eye, EyeOff, RefreshCw, KeyRound, Truck, Pencil, Tag, Mail, History } from 'lucide-react'
+import { Settings, User, Bell, Database, Save, Plus, Trash2, X, Eye, EyeOff, RefreshCw, KeyRound, Pencil, CheckSquare, Tag, Mail, History } from 'lucide-react'
 import { formatDate, formatDateTime, generateId } from '@/lib/utils'
+import ApprovalsPanel from '@/components/settings/ApprovalsPanel'
 import { getSettings, saveSettings, type AppSettings } from '@/lib/app-settings'
 import { useRole } from '@/lib/use-role'
 import DatabaseStatusPanel from '@/components/settings/DatabaseStatusPanel'
@@ -19,25 +20,13 @@ const roleConfig: Record<string, { label: string; badge: string }> = {
 const tabs = [
   { id: 'general',    label: 'General',       icon: Settings },
   { id: 'users',      label: 'Users & Access', icon: User },
-  { id: 'suppliers',  label: 'Suppliers',    icon: Truck },
+  { id: 'approvals',  label: 'Approvals',    icon: CheckSquare },
   { id: 'categories', label: 'Categories',   icon: Tag },
   { id: 'alerts',     label: 'Alert Settings', icon: Bell },
   { id: 'email-alerts', label: 'Email Alerts', icon: Mail },
   { id: 'audit-log',  label: 'Audit Log',    icon: History },
   { id: 'database',   label: 'Database',      icon: Database },
 ]
-
-type SupplierRow = {
-  id: string
-  name: string
-  contact_person: string | null
-  email: string | null
-  phone: string | null
-  address: string | null
-  country: string | null
-  lead_time_days: number | null
-  created_at?: string
-}
 
 export default function SettingsPage() {
   const role = useRole()
@@ -63,14 +52,6 @@ export default function SettingsPage() {
   const [resetError, setResetError] = useState('')
   const [resetSuccess, setResetSuccess] = useState('')
   const [resetting, setResetting] = useState(false)
-  const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
-  const [loadingSuppliers, setLoadingSuppliers] = useState(false)
-  const [supplierModalMode, setSupplierModalMode] = useState<'add' | 'edit' | null>(null)
-  const [supplierEditId, setSupplierEditId] = useState<string | null>(null)
-  const [supplierForm, setSupplierForm] = useState({ name: '', contact_person: '', email: '', phone: '', address: '', country: '', lead_time_days: '' })
-  const [supplierError, setSupplierError] = useState('')
-  const [savingSupplier, setSavingSupplier] = useState(false)
-  const [deletingSupplierId, setDeletingSupplierId] = useState<string | null>(null)
   const [recipients, setRecipients] = useState<{ id: string; email: string }[]>([])
   const [loadingRecipients, setLoadingRecipients] = useState(false)
   const [recipientInput, setRecipientInput] = useState('')
@@ -105,18 +86,7 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadSuppliers() {
-    if (!isConfigured) return
-    setLoadingSuppliers(true)
-    try {
-      const { createClient } = await import('@/lib/supabase/client')
-      const sb = createClient()
-      const { data } = await sb.from('suppliers').select('*').order('name')
-      setSuppliers((data ?? []) as SupplierRow[])
-    } finally {
-      setLoadingSuppliers(false)
-    }
-  }
+
 
   async function loadRecipients() {
     if (!isConfigured) return
@@ -248,90 +218,8 @@ export default function SettingsPage() {
     }
   }
 
-  function openSupplierModal(row?: SupplierRow) {
-    setSupplierError('')
-    if (row) {
-      setSupplierModalMode('edit')
-      setSupplierEditId(row.id)
-      setSupplierForm({
-        name: row.name ?? '', contact_person: row.contact_person ?? '', email: row.email ?? '',
-        phone: row.phone ?? '', address: row.address ?? '', country: row.country ?? '',
-        lead_time_days: row.lead_time_days != null ? String(row.lead_time_days) : '',
-      })
-    } else {
-      setSupplierModalMode('add')
-      setSupplierEditId(null)
-      setSupplierForm({ name: '', contact_person: '', email: '', phone: '', address: '', country: '', lead_time_days: '' })
-    }
-  }
-
-  async function saveSupplier(e: React.FormEvent) {
-    e.preventDefault()
-    if (!supplierForm.name.trim()) { setSupplierError('Supplier name is required.'); return }
-    const leadRaw = supplierForm.lead_time_days.trim()
-    if (leadRaw !== '' && (!/^\d+$/.test(leadRaw) || Number(leadRaw) > 3650)) {
-      setSupplierError('Lead time must be a whole number of days (0–3650).'); return
-    }
-    setSupplierError('')
-    setSavingSupplier(true)
-    const payload = {
-      name: supplierForm.name.trim(),
-      contact_person: supplierForm.contact_person.trim() || null,
-      email: supplierForm.email.trim() || null,
-      phone: supplierForm.phone.trim() || null,
-      address: supplierForm.address.trim() || null,
-      country: supplierForm.country.trim() || null,
-      lead_time_days: leadRaw === '' ? null : Number(leadRaw),
-    }
-    try {
-      if (isConfigured) {
-        const { createClient } = await import('@/lib/supabase/client')
-        const sb = createClient()
-        if (supplierModalMode === 'edit' && supplierEditId) {
-          const { data, error } = await sb.from('suppliers').update(payload).eq('id', supplierEditId).select().single()
-          if (error) { setSupplierError(error.message); return }
-          setSuppliers(prev => prev.map(s => s.id === supplierEditId ? (data as SupplierRow) : s).sort((a, b) => a.name.localeCompare(b.name)))
-        } else {
-          const { data, error } = await sb.from('suppliers').insert(payload).select().single()
-          if (error) { setSupplierError(error.message); return }
-          setSuppliers(prev => [...prev, data as SupplierRow].sort((a, b) => a.name.localeCompare(b.name)))
-        }
-      } else {
-        if (supplierModalMode === 'edit' && supplierEditId) {
-          setSuppliers(prev => prev.map(s => s.id === supplierEditId ? { ...s, ...payload } : s).sort((a, b) => a.name.localeCompare(b.name)))
-        } else {
-          setSuppliers(prev => [...prev, { id: generateId(), ...payload }].sort((a, b) => a.name.localeCompare(b.name)))
-        }
-      }
-      setSupplierModalMode(null)
-      setSupplierEditId(null)
-    } finally {
-      setSavingSupplier(false)
-    }
-  }
-
-  async function deleteSupplier(row: SupplierRow) {
-    if (!confirm(`Delete supplier "${row.name}"? A snapshot is kept in the audit log. Any products or purchase orders that used it stay, with the supplier field cleared.`)) return
-    setSupplierError('')
-    setDeletingSupplierId(row.id)
-    try {
-      if (isConfigured) {
-        const { createClient } = await import('@/lib/supabase/client')
-        const sb = createClient()
-        // delete_supplier_cascade: audit_log snapshot + null the supplier out of
-        // products / purchase_orders, then delete — so it can't be blocked by FKs.
-        const { error } = await sb.rpc('delete_supplier_cascade', { s_id: row.id })
-        if (error) { setSupplierError(error.message); return }
-      }
-      setSuppliers(prev => prev.filter(s => s.id !== row.id))
-    } finally {
-      setDeletingSupplierId(null)
-    }
-  }
-
   useEffect(() => {
     if (activeTab === 'users') loadUsers()
-    if (activeTab === 'suppliers') loadSuppliers()
     if (activeTab === 'categories') loadCategories()
     if (activeTab === 'email-alerts') loadRecipients()
     if (activeTab === 'audit-log') loadAuditLog()
@@ -650,91 +538,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {activeTab === 'suppliers' && (
-            <div className="card" style={{ overflow: 'hidden' }}>
-              <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>Suppliers</h3>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {supplierError && (
-                    <span style={{ fontSize: 12, color: '#991B1B', fontWeight: 600 }}>{supplierError}</span>
-                  )}
-                  <button className="btn-secondary btn-sm" onClick={() => { setSupplierError(''); loadSuppliers() }}>
-                    <RefreshCw size={13} style={{ animation: loadingSuppliers ? 'spin 1s linear infinite' : 'none' }} />
-                    Refresh
-                  </button>
-                  <button className="btn-primary btn-sm" onClick={() => openSupplierModal()}>
-                    <Plus size={14} /> Add Supplier
-                  </button>
-                </div>
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-                      {['Supplier', 'Country', 'Lead Time', 'Contact Person', 'Email', 'Phone', 'Actions'].map(col => (
-                        <th key={col} style={{ padding: '12px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                          {col}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {suppliers.length === 0 && !loadingSuppliers && (
-                      <tr>
-                        <td colSpan={7} style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
-                          {isConfigured ? 'No suppliers yet. Click "Add Supplier" to create one.' : 'Connect Supabase to manage suppliers.'}
-                        </td>
-                      </tr>
-                    )}
-                    {suppliers.map((s, i) => (
-                      <tr key={s.id} className="table-row-hover" style={{ borderBottom: i < suppliers.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
-                        <td style={{ padding: '14px 20px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{
-                              width: 34, height: 34, borderRadius: 10, background: '#E0F7FA',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                            }}>
-                              <Truck size={16} style={{ color: '#2FA6B8' }} />
-                            </div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{s.name}</div>
-                          </div>
-                        </td>
-                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.country || '—'}</td>
-                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>
-                          {s.lead_time_days != null ? `${s.lead_time_days} day${s.lead_time_days === 1 ? '' : 's'}` : '—'}
-                        </td>
-                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.contact_person || '—'}</td>
-                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.email || '—'}</td>
-                        <td style={{ padding: '14px 20px', fontSize: 13, color: '#374151' }}>{s.phone || '—'}</td>
-                        <td style={{ padding: '14px 20px' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              onClick={() => openSupplierModal(s)}
-                              title="Edit supplier"
-                              style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E2E8F0', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              onClick={() => deleteSupplier(s)}
-                              disabled={deletingSupplierId === s.id}
-                              title="Delete supplier"
-                              style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #FECACA', background: '#FEE2E2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991B1B', opacity: deletingSupplierId === s.id ? 0.4 : 1 }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ padding: '14px 24px', background: '#F8FAFC', borderTop: '1px solid #E2E8F0', fontSize: 12, color: '#64748B' }}>
-                Suppliers appear in the dropdown when creating a Purchase Order, and on the downloaded PO document. Lead time is the supplier&rsquo;s production time in days — the Create PO dialog uses it to estimate when goods will be ready so you know when to order.
-              </div>
-            </div>
-          )}
+          {activeTab === 'approvals' && <ApprovalsPanel />}
 
           {activeTab === 'categories' && (
             <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -1115,74 +919,6 @@ export default function SettingsPage() {
       )}
 
       {/* Supplier Add / Edit Modal */}
-      {supplierModalMode && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 460, padding: 28, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
-            <button
-              onClick={() => setSupplierModalMode(null)}
-              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' }}
-            >
-              <X size={18} />
-            </button>
-            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>
-              {supplierModalMode === 'edit' ? 'Edit Supplier' : 'Add Supplier'}
-            </h3>
-            <p style={{ fontSize: 13, color: '#64748B', marginBottom: 20 }}>Only the name is required — the rest shows on the purchase order.</p>
-            <form onSubmit={saveSupplier} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Supplier Name *</label>
-                <input type="text" className="input-field" required placeholder="e.g. MedSupply Co."
-                  value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Contact Person</label>
-                  <input type="text" className="input-field" placeholder="e.g. Jane Cruz"
-                    value={supplierForm.contact_person} onChange={e => setSupplierForm(f => ({ ...f, contact_person: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Phone</label>
-                  <input type="text" className="input-field" placeholder="e.g. +63 917 000 0000"
-                    value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Email</label>
-                <input type="email" className="input-field" placeholder="e.g. orders@medsupply.com"
-                  value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Country</label>
-                  <input type="text" className="input-field" placeholder="e.g. Germany"
-                    value={supplierForm.country} onChange={e => setSupplierForm(f => ({ ...f, country: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Lead time to produce (days)</label>
-                  <input type="number" min={0} max={3650} className="input-field" placeholder="e.g. 45"
-                    value={supplierForm.lead_time_days} onChange={e => setSupplierForm(f => ({ ...f, lead_time_days: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Address</label>
-                <textarea className="input-field" rows={2} placeholder="Street, city, country" style={{ resize: 'vertical' }}
-                  value={supplierForm.address} onChange={e => setSupplierForm(f => ({ ...f, address: e.target.value }))} />
-              </div>
-              {supplierError && (
-                <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 10, fontSize: 12, color: '#991B1B', fontWeight: 600 }}>
-                  {supplierError}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
-                <button type="button" className="btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setSupplierModalMode(null)}>Cancel</button>
-                <button type="submit" className="btn-primary btn-sm" style={{ flex: 1 }} disabled={savingSupplier}>
-                  {savingSupplier ? 'Saving…' : supplierModalMode === 'edit' ? 'Save Changes' : 'Add Supplier'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

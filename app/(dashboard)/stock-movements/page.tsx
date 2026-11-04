@@ -7,6 +7,7 @@ import { formatDateTime } from '@/lib/utils'
 import { useRole, canExport } from '@/lib/use-role'
 import { createClient } from '@/lib/supabase/client'
 import type { Product, Transaction, User } from '@/types'
+import { usePaged } from '@/components/ui/Pager'
 
 const supabaseConfigured = (() => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
@@ -66,6 +67,8 @@ export default function StockMovementsPage() {
     const matchType = typeFilter === 'All' || tx.type === typeFilter
     return matchSearch && matchType
   })
+
+  const { pageRows, pager } = usePaged(filtered, `${search}|${typeFilter}`)
 
   const summary = {
     inbound: transactions.filter(t => t.type === 'inbound' || t.type === 'purchase_order_received').reduce((s, t) => s + t.quantity, 0),
@@ -170,11 +173,11 @@ export default function StockMovementsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((tx, i) => {
+              {pageRows.map((tx, i) => {
                 const cfg = typeConfig[tx.type] ?? { label: tx.type, badge: 'badge-gray', icon: ArrowLeftRight, color: '#64748B' }
                 const Icon = cfg.icon
                 return (
-                  <tr key={tx.id} className="table-row-hover" style={{ borderBottom: i < filtered.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                  <tr key={tx.id} className="table-row-hover" style={{ borderBottom: i < pageRows.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                     <td style={{ padding: '12px 16px', fontSize: 12, color: '#374151', whiteSpace: 'nowrap' }}>
                       {formatDateTime(tx.created_at)}
                     </td>
@@ -219,6 +222,7 @@ export default function StockMovementsPage() {
             </tbody>
           </table>
         </div>
+        {pager}
       </div>
     </div>
   )

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
 
-const TABLES = ['products', 'product_batches', 'suppliers', 'purchase_orders', 'purchase_order_items', 'transactions', 'alerts', 'alert_recipients', 'audit_log', 'users', 'categories']
+const TABLES = ['products', 'product_batches', 'suppliers', 'purchase_orders', 'purchase_order_items', 'documents', 'document_lines', 'storage_bins', 'customers', 'transactions', 'alerts', 'alert_recipients', 'audit_log', 'users', 'categories']
 
 type TableStatus = { state: 'checking' } | { state: 'ok'; count: number | null } | { state: 'error'; message: string }
 

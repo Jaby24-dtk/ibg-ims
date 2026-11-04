@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { X, Camera, SwitchCamera, CheckCircle, AlertTriangle } from 'lucide-react'
+import { X, Camera, SwitchCamera, CheckCircle } from 'lucide-react'
+import PhotoScanButton from './PhotoScanButton'
 
 interface CameraScannerProps {
   onScan: (barcode: string) => void
@@ -23,6 +24,12 @@ export default function CameraScanner({ onScan, onClose }: CameraScannerProps) {
   const [errorMsg, setErrorMsg] = useState('')
   const [lastScan, setLastScan] = useState('')
   const [scanCount, setScanCount] = useState(0)
+  const onPhoto = (text: string) => {
+    lastScanRef.current = text // so the live camera doesn't fire the same code again
+    setLastScan(text)
+    setScanCount(n => n + 1)
+    onScan(text)
+  }
 
   // Dynamically import ZXing (browser-only)
   const startScanner = useCallback(async (deviceId: string | undefined) => {
@@ -287,7 +294,8 @@ export default function CameraScanner({ onScan, onClose }: CameraScannerProps) {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+            <PhotoScanButton onScan={onPhoto} />
             <button className="btn-secondary btn-sm" onClick={onClose}>Done</button>
           </div>
         </div>
