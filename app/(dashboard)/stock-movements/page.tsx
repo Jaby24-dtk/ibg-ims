@@ -62,8 +62,8 @@ export default function StockMovementsPage() {
     const q = search.toLowerCase()
     const matchSearch = !q
       || (tx.product?.name ?? '').toLowerCase().includes(q)
-      || tx.sku.toLowerCase().includes(q)
-      || tx.barcode.includes(q)
+      || (tx.sku ?? '').toLowerCase().includes(q)
+      || (tx.barcode ?? '').toLowerCase().includes(q)
     const matchType = typeFilter === 'All' || tx.type === typeFilter
     return matchSearch && matchType
   })
@@ -94,8 +94,8 @@ export default function StockMovementsPage() {
                 ...filtered.map(tx => [
                   tx.created_at,
                   tx.product?.name ?? '',
-                  tx.sku,
-                  tx.barcode,
+                  tx.sku ?? '',
+                  tx.barcode ?? '',
                   tx.type,
                   String(tx.quantity),
                   tx.user?.name ?? '',
