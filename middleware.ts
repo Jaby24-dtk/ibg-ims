@@ -32,7 +32,16 @@ function base64UrlDecode(str: string): string {
 // this purely local: read the cookie, check the token hasn't expired by its
 // own embedded timestamp, done. No network call means no rate limit exposure
 // and no dependency on Supabase's Auth API being healthy just to view a page.
-function isSessionValid(request: NextRequest): boolean {
+// `lenient` (protected pages): a session whose short-lived access token has
+// passed its expiry still counts as signed in as long as it carries a refresh
+// token. The browser client renews the access token itself (and pauses that
+// while the tab is in the background), so a strict expiry check here bounced
+// people to /login mid-edit the moment they clicked or saved after the token
+// lapsed — seen live 2026-11-04 (Erene, Inventory). A truly revoked session is
+// still caught: the client's refresh fails, it clears the cookie, and AuthGate
+// sends them to /login. `strict` is kept for /login's own "already signed in →
+// /dashboard" bounce so a dead-but-present cookie can't cause a redirect loop.
+function isSessionValid(request: NextRequest, mode: 'strict' | 'lenient' = 'strict'): boolean {
   // Match the exact configured cookie name (plus chunk suffixes) only — not
   // a generic sb-*-auth-token pattern. A generic pattern would also catch
   // the old sb-<ref>-auth-token cookie name from before the 2026-08-19
@@ -60,7 +69,8 @@ function isSessionValid(request: NextRequest): boolean {
   try {
     const session = JSON.parse(jsonStr)
     const expiresAt = session?.expires_at
-    return typeof expiresAt === 'number' && expiresAt * 1000 > Date.now()
+    if (typeof expiresAt === 'number' && expiresAt * 1000 > Date.now()) return true
+    return mode === 'lenient' && typeof session?.refresh_token === 'string' && session.refresh_token.length > 0
   } catch {
     return false
   }
@@ -114,7 +124,7 @@ export function middleware(request: NextRequest) {
 
   clearLegacySameSiteNoneCookie(response, supabaseUrl)
 
-  const authed = isSessionValid(request)
+  const authed = isSessionValid(request, 'lenient')
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
   const isRoot = pathname === '/'
@@ -135,7 +145,7 @@ export function middleware(request: NextRequest) {
     return redirectRes
   }
 
-  if (authed && isLoginPage) {
+  if (isLoginPage && isSessionValid(request, 'strict')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     const redirectRes = NextResponse.redirect(url)
