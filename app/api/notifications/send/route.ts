@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { AUTH_COOKIE_OPTIONS } from '@/lib/supabase/config'
 
 // Emails queued in-app notifications (form assigned / submitted / approved / remark …) via
 // Brevo's transactional API. Called fire-and-forget by the browser after each form action.
@@ -11,12 +12,33 @@ const APP_URL = process.env.APP_URL ?? 'https://ims.ibgctasia.com'
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 
+function accessTokenFromCookies(req: NextRequest): string | null {
+  const base = AUTH_COOKIE_OPTIONS.name
+  const parts = req.cookies.getAll()
+    .filter(c => c.name === base || c.name.startsWith(`${base}.`))
+    .sort((a, b) => (Number(a.name.split('.').pop()) || 0) - (Number(b.name.split('.').pop()) || 0))
+  if (!parts.length) return null
+  const raw = parts.map(c => c.value).join('')
+  try {
+    const json = raw.startsWith('base64-') ? Buffer.from(raw.slice(7), 'base64url').toString('utf8') : raw
+    const token = JSON.parse(json)?.access_token
+    return typeof token === 'string' && token ? token : null
+  } catch { return null }
+}
+
 export async function POST(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anon) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
-  const sb = createServerClient(url, anon, { cookies: { getAll: () => req.cookies.getAll(), setAll() {} } })
-  const { data: { user } } = await sb.auth.getUser()
+  // Verify the caller's access token only — never a server-side refresh. This
+  // route can't write cookies back, so a refresh here would rotate (burn) the
+  // browser's refresh token and sign the user out moments later. It also used
+  // to read the default sb-<ref>-auth-token name instead of the app's renamed
+  // cookie, so it never found the real session and 401'd on every call.
+  const accessToken = accessTokenFromCookies(req)
+  if (!accessToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const sb = createSupabaseClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } })
+  const { data: { user } } = await sb.auth.getUser(accessToken)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const apiKey = process.env.BREVO_API_KEY
