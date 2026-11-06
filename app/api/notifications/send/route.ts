@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { AUTH_COOKIE_OPTIONS } from '@/lib/supabase/config'
+import { accessTokenFromCookies } from '@/lib/supabase/request-auth'
 
 // Emails queued in-app notifications (form assigned / submitted / approved / remark …) via
 // Brevo's transactional API. Called fire-and-forget by the browser after each form action.
@@ -11,20 +11,6 @@ import { AUTH_COOKIE_OPTIONS } from '@/lib/supabase/config'
 const APP_URL = process.env.APP_URL ?? 'https://ims.ibgctasia.com'
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
-
-function accessTokenFromCookies(req: NextRequest): string | null {
-  const base = AUTH_COOKIE_OPTIONS.name
-  const parts = req.cookies.getAll()
-    .filter(c => c.name === base || c.name.startsWith(`${base}.`))
-    .sort((a, b) => (Number(a.name.split('.').pop()) || 0) - (Number(b.name.split('.').pop()) || 0))
-  if (!parts.length) return null
-  const raw = parts.map(c => c.value).join('')
-  try {
-    const json = raw.startsWith('base64-') ? Buffer.from(raw.slice(7), 'base64url').toString('utf8') : raw
-    const token = JSON.parse(json)?.access_token
-    return typeof token === 'string' && token ? token : null
-  } catch { return null }
-}
 
 export async function POST(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL

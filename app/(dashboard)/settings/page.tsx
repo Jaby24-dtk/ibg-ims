@@ -8,6 +8,15 @@ import { getSettings, saveSettings, type AppSettings } from '@/lib/app-settings'
 import { useRole } from '@/lib/use-role'
 import DatabaseStatusPanel from '@/components/settings/DatabaseStatusPanel'
 
+// User-management calls are verified server-side from the session cookie. If the
+// tab sat in the background the access token may have lapsed, so let the browser
+// client renew it (and rewrite the cookie) before the request goes out.
+async function usersApi(method: 'POST' | 'PATCH' | 'DELETE', body: unknown) {
+  const { createClient } = await import('@/lib/supabase/client')
+  await createClient().auth.getSession()
+  return fetch('/api/users', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
 type AppUser = { id: string; name: string; email: string; role: string; created_at: string }
 
 const roleConfig: Record<string, { label: string; badge: string }> = {
@@ -237,11 +246,7 @@ export default function SettingsPage() {
     setInviteError('')
     setInviting(true)
     try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(inviteForm),
-      })
+      const res = await usersApi('POST', inviteForm)
       const text = await res.text()
       let data: Record<string, string> = {}
       try { data = JSON.parse(text) } catch { /* response wasn't JSON */ }
@@ -268,11 +273,7 @@ export default function SettingsPage() {
     setDeleteError('')
     setDeletingId(userId)
     try {
-      const res = await fetch('/api/users', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      })
+      const res = await usersApi('DELETE', { userId })
       const text = await res.text()
       let data: Record<string, string> = {}
       try { data = JSON.parse(text) } catch {}
@@ -293,11 +294,7 @@ export default function SettingsPage() {
     setResetError('')
     setResetting(true)
     try {
-      const res = await fetch('/api/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: resetTarget?.id, password: resetPassword }),
-      })
+      const res = await usersApi('PATCH', { userId: resetTarget?.id, password: resetPassword })
       const text = await res.text()
       let data: Record<string, string> = {}
       try { data = JSON.parse(text) } catch {}

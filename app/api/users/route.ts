@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { userFromRequest } from '@/lib/supabase/request-auth'
 
 const VALID_ROLES = ['administrator', 'inventory_manager', 'staff', 'viewer']
 
@@ -12,14 +12,7 @@ async function requireAdmin(req: NextRequest): Promise<{ error: string } | { adm
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !anonKey || !serviceKey) return { error: 'Supabase not configured' }
 
-  const supabase = createServerClient(supabaseUrl, anonKey, {
-    cookies: {
-      getAll() { return req.cookies.getAll() },
-      setAll() {},
-    },
-  })
-
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await userFromRequest(req)
   if (!user) return { error: 'Unauthorized' }
 
   const res = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${user.id}&select=role,name,email`, {
